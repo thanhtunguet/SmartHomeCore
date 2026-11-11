@@ -79,7 +79,7 @@ CREATE TABLE device_status_history (
 ) STRICT;
 CREATE INDEX device_status_history_device ON device_status_history (device_id, changed_at DESC);
 
--- Wake/shutdown commands (brief: command_history). State machine: docs/architecture.md §8.2.
+-- Wake/shutdown commands (brief: command_history). State machine: docs/design/architecture.md §8.2.
 CREATE TABLE commands (
     id              TEXT    PRIMARY KEY,
     device_id       TEXT    NOT NULL REFERENCES devices (id) ON DELETE CASCADE,

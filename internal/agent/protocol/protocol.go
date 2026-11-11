@@ -1,4 +1,4 @@
-// Package protocol implements HomeCore Agent Protocol v1 (docs/agent-protocol.md): the wire
+// Package protocol implements HomeCore Agent Protocol v1 (docs/design/agent-protocol.md): the wire
 // format of Controller → Agent commands, Ed25519 signing and the Agent-side verification
 // pipeline including replay protection. It depends only on the standard library and is shared by
 // the Controller (signing client) and the Agent (verifier).
@@ -138,7 +138,7 @@ func Sign(priv ed25519.PrivateKey, cmd Command) (SignedRequest, error) {
 	return SignedRequest{Body: body, KeyID: keyID, Signature: base64.RawURLEncoding.EncodeToString(sig)}, nil
 }
 
-// Error codes returned by the Agent (docs/agent-protocol.md §3).
+// Error codes returned by the Agent (docs/design/agent-protocol.md §3).
 const (
 	CodeUnauthorized     = "unauthorized"
 	CodeBadRequest       = "bad_request"

@@ -1,5 +1,5 @@
 // Package commands models asynchronous device commands (wake, shutdown) and their lifecycle
-// (docs/architecture.md §8.2, ADR-003).
+// (docs/design/architecture.md §8.2, ADR-003).
 //
 // TODO(phase-2/3): Repository (commands table; rely on the commands_one_active unique index for
 // dedup), Dispatcher component (WOL send / signed agent call with retries using the same

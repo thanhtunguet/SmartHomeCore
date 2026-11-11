@@ -1,8 +1,8 @@
-# CLAUDE.md: guidance for AI coding agents
+# AGENTS.md: guidance for AI coding agents
 
-Read `docs/architecture.md`, `docs/decisions.md` and (for agent work) `docs/agent-protocol.md`
-before changing behaviour. They are the design contract; update them in the same change if a
-decision changes.
+This file is the instruction set for every AI coding agent (`CLAUDE.md` links here). The project
+documentation in `docs/` is the contract for what to build and how; **follow it and keep it current**.
+See [Documentation rules](#documentation-rules).
 
 ## Commands
 
@@ -39,12 +39,70 @@ engines, message brokers, Redis, ORMs, DI frameworks, or new heavy dependencies 
 ## Security invariants (never weaken)
 
 - The Agent executes only enum actions (`shutdown`, `reboot`). No shell, no arguments from requests.
-- Every agent command is verified in the order defined in `docs/agent-protocol.md` §3: signature
-  before parsing, then agent_id, allowlist, timestamp window, start-time floor, nonce, idempotency.
+- Every agent command is verified in the order defined in `docs/design/agent-protocol.md` §3:
+  signature before parsing, then agent_id, allowlist, timestamp window, start-time floor, nonce,
+  idempotency.
 - No plaintext secrets in the DB (seal with `internal/secrets`), none in API responses or logs.
 - JWT signing key, Controller Ed25519 key and master key are distinct.
 - Shutdown requires the `admin` role and writes `audit_log`.
 - Wake/shutdown endpoints return `202` + command; never block until the machine changes state.
+
+## Documentation rules
+
+Documentation is part of the definition of done. A change is not complete until the docs below
+describe the code as it now is.
+
+### Map
+
+| Folder | Holds | Main files |
+|--------|-------|------------|
+| `docs/requirements/` | What the system must do; requirement IDs, status, verifying tests | `overview.md` (brief traceability), `runtime-and-configuration.md`, `http-api.md`, `storage-and-secrets.md`, `shutdown-agent.md` |
+| `docs/design/` | How it is built | `architecture.md`, `database.md`, `agent-protocol.md`, `decisions.md` (ADRs) |
+| `docs/plans/` | What's next | `roadmap.md` (phase checklists + backlog) |
+| `docs/changelogs/` | What changed, per session | `YYYY-MM-DD-slug.md`, index in `README.md` |
+
+`BRIEF.md` is the original input. Do not edit it; its points are tracked in
+`docs/requirements/overview.md` §6.
+
+### Before starting work
+
+1. Read `docs/requirements/overview.md` and the requirement document for the area you are touching.
+2. Read the relevant design docs: `architecture.md` always; `database.md` for any SQL or schema
+   work; `agent-protocol.md` for anything on the Agent or the dispatcher; `decisions.md` before
+   going against an existing choice.
+3. Check `docs/plans/roadmap.md` so the work fits the current phase and is not out of MVP scope.
+4. If the docs and the code disagree, raise it with the user. Do not silently pick one; fixing the
+   mismatch is part of the task.
+
+### While working: update docs in the same change
+
+| When you… | Update |
+|-----------|--------|
+| Implement, change or remove behaviour | The requirement doc: add or edit the `REQ-*` row, set its **Status**, name the verifying test. New area with no doc yet → create `docs/requirements/<area>.md` and link it from `overview.md` §5 |
+| Complete or partly complete a brief point | `requirements/overview.md` §6 traceability row (status + reference) |
+| Change structure, module responsibilities, flows, state machines, security model | `design/architecture.md` |
+| Add a migration or change SQL semantics | `design/database.md` (tables, columns, indexes, lifecycle, brief mapping) |
+| Change the Agent wire format or verification | `design/agent-protocol.md` (normative; bump the protocol version for incompatible changes) |
+| Make or reverse a significant technical decision (dependency, protocol, storage, layering) | New ADR in `design/decisions.md`. Never rewrite an accepted ADR; supersede it |
+| Change the REST API | `api/openapi.yaml` first (spec-first), then the endpoint status table in `requirements/http-api.md` |
+| Finish a roadmap item or discover new work/gaps | Tick or add items in `plans/roadmap.md`; put gaps in its Backlog and the requirement doc's "Known gaps" |
+| Change config keys | `configs/homecore.example.yaml`, `configs/dev.yaml`, `REQ-RT-*` |
+
+### At the end of every session or change set
+
+- Add or extend a changelog entry `docs/changelogs/YYYY-MM-DD-short-slug.md` using the template in
+  `docs/changelogs/README.md`, and add it to the index table there (newest first).
+- The changelog must list **verification honestly**: the commands you ran with their results,
+  and what was not run.
+- Update the "Last reviewed/updated" date of each document you changed.
+
+### Writing conventions
+
+- English, concise, tables over prose for requirements and schema.
+- Requirement IDs (`REQ-<AREA>-NNN`) are stable: never renumber or reuse; mark removed ones `Removed`.
+- Status vocabulary only: `Implemented`, `Implemented (untested)`, `Partial`, `Changed`, `Planned`.
+  Do not mark something `Implemented` without a test or a recorded smoke test.
+- Use relative links between docs; reference code by path (`internal/agent/server.go`), not by line number.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

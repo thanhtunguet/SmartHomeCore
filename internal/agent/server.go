@@ -1,5 +1,5 @@
 // Package agent implements the Agent role: a small HTTP listener that accepts Ed25519-signed
-// power commands from trusted Controllers (docs/agent-protocol.md) and executes an allowlisted
+// power commands from trusted Controllers (docs/design/agent-protocol.md) and executes an allowlisted
 // action through platform.PowerController. It never runs shell commands supplied by a client.
 package agent
 

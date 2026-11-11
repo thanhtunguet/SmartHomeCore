@@ -39,12 +39,16 @@ build/devtools send -key /tmp/ctl.key -agent http://127.0.0.1:9750 \
 
 ## Documentation
 
-- [docs/architecture.md](docs/architecture.md): analysis of the brief, modules, data model, state machines, security, roadmap
-- [docs/decisions.md](docs/decisions.md): architecture decision records (Ed25519, device identity, SQLite driver, …)
-- [docs/agent-protocol.md](docs/agent-protocol.md): Controller → Agent wire protocol (normative)
+All project documentation lives in [`docs/`](docs/README.md):
+
+- [docs/requirements/overview.md](docs/requirements/overview.md): goals, scope and a point-by-point traceability of `BRIEF.md`
+- [docs/requirements/](docs/requirements/): requirement docs (IDs, status, verifying tests) for the implemented areas
+- [docs/design/architecture.md](docs/design/architecture.md) · [database.md](docs/design/database.md) · [agent-protocol.md](docs/design/agent-protocol.md) · [decisions.md](docs/design/decisions.md)
+- [docs/plans/roadmap.md](docs/plans/roadmap.md): phases, next steps, backlog
+- [docs/changelogs/](docs/changelogs/README.md): change history by session
 - [api/openapi.yaml](api/openapi.yaml): REST contract, the **source of truth** for routes and auth
 - [deploy/README.md](deploy/README.md): systemd + polkit installation
-- [BRIEF.md](BRIEF.md): original technical brief (Vietnamese)
+- [AGENTS.md](AGENTS.md): rules for AI coding agents, including documentation duties
 
 ## Layout
 
@@ -69,4 +73,4 @@ configs/ deploy/     config & service files     internal/{auth,devices,monitorin
 Phase 1 foundation is in place: config, lifecycle and modes, HTTP server, spec-first API, offline
 Swagger UI, SQLite with the full schema, and the agent protocol with replay protection. The other
 modules are stubs; protected endpoints answer `401` until JWT auth lands and `501` until they are
-implemented. See the roadmap in [docs/architecture.md §15](docs/architecture.md#15-roadmap).
+implemented. See [docs/plans/roadmap.md](docs/plans/roadmap.md).

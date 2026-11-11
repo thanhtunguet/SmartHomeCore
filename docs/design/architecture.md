@@ -1,8 +1,13 @@
-# HomeCore — Architecture
+# HomeCore — Architecture Design
 
-Status: **Draft v0.2** (derived from `BRIEF.md` v0.1). Decisions referenced as `ADR-00x` live in
-[decisions.md](decisions.md). The agent wire protocol is specified in [agent-protocol.md](agent-protocol.md).
-The REST contract is [api/openapi.yaml](../api/openapi.yaml) (source of truth).
+| | |
+|---|---|
+| Status | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1 |
+| Last reviewed | 2026-11-11 |
+| Requirements | [requirements/overview.md](../requirements/overview.md) |
+| Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs) |
+| API contract | [api/openapi.yaml](../../api/openapi.yaml) (source of truth) |
+| Roadmap | [plans/roadmap.md](../plans/roadmap.md) |
 
 ---
 
@@ -145,7 +150,7 @@ internal/
 web/                     embedded static UI + offline Swagger UI assets
 configs/                 example configuration
 deploy/                  systemd units, polkit rules
-docs/                    architecture, decisions, protocols
+docs/                    requirements, design, plans, changelogs (see docs/README.md)
 scripts/                 dev scripts (fetch Swagger UI, etc.)
 ```
 
@@ -257,25 +262,15 @@ expressions, no persistence; jobs re-derive their work from the DB on each tick.
 
 ## 7. Data model (SQLite)
 
-Authoritative DDL: `internal/storage/migrations/0001_init.sql`.
+Full specification (tables, columns, constraints, indexes, conventions, migration process):
+**[database.md](database.md)**. Authoritative DDL: `internal/storage/migrations/`.
 
-| Table | Purpose | Notes |
-|-------|---------|-------|
-| `schema_migrations` | applied migration versions | managed by the runner |
-| `users` | accounts | `role` ∈ `admin`, `viewer`; argon2id hash |
-| `refresh_tokens` | rotating refresh tokens | only SHA-256 of the token stored; `family_id` for reuse detection |
-| `devices` | registry | `status` ∈ `unknown/online/offline` |
-| `agent_bindings` | device ↔ agent link | `agent_id`, port, scheme, optional agent public key (for signed acks later) |
-| `controller_keys` | Controller Ed25519 key pairs | private key sealed; supports rotation (`retired_at`) |
-| `device_status_history` | status **transitions** only | pruned by retention |
-| `commands` | wake/shutdown commands (brief: `command_history`) | state machine §8.2 |
-| `audit_log` | security-relevant actions | who, what, target, result |
-| `ddns_configs` | DDNS records | token sealed; last IP, last success, last error |
-| `ddns_sync_history` | sync attempts | pruned by retention |
-| `system_settings` | key/value | e.g. sealed JWT signing key |
-
-The brief's `agent_credentials` is split into `agent_bindings` (per device) and `controller_keys`
-(per controller), because with Ed25519 the secret material belongs to the Controller, not the device.
+Summary: 12 STRICT tables in four groups. **Identity**: `users`, `refresh_tokens`. **Devices**:
+`devices`, `agent_bindings`, `device_status_history`. **Operations**: `commands`, `audit_log`,
+`controller_keys`. **DDNS and settings**: `ddns_configs`, `ddns_sync_history`, `system_settings`.
+`schema_migrations` belongs to the migration runner. The brief's `agent_credentials` is split into
+`agent_bindings` (per device) and `controller_keys` (per Controller), because with Ed25519 the
+secret material belongs to the Controller, not the device.
 
 ---
 
@@ -366,7 +361,7 @@ Principles:
 ## 11. Configuration
 
 YAML file (`--config`), then `HOMECORE_*` environment overrides, then validation. See
-[configs/homecore.example.yaml](../configs/homecore.example.yaml). Android passes the YAML string and
+[configs/homecore.example.yaml](../../configs/homecore.example.yaml). Android passes the YAML string and
 its app-private data dir to `mobile.Start`.
 
 ---
@@ -405,27 +400,7 @@ use `//go:build linux && !android`.
 
 ---
 
-## 15. Roadmap
+## 15. Roadmap and implementation status
 
-| Phase | Content | Exit criteria |
-|-------|---------|---------------|
-| 0 · Android spike (parallel to 1) | gomobile AAR with `mobile.Start/Stop`, SQLite WAL on device, WOL broadcast from Android, foreground service | runs 24 h on TV box (arm64 **and** armv7) |
-| 1 · Foundation | config, logging, HTTP server, OpenAPI + Swagger UI, SQLite + migrations, health, lifecycle | `make run` serves `/api/docs`, `/readyz` green |
-| 2 · Devices | CRUD, monitor + hysteresis, history, WOL, commands | wake a real machine and see it go `online` |
-| 3 · Secure agent | protocol, verifier, executor, provisioning CLI, systemd + polkit | signed shutdown of a Linux box; replay tests pass |
-| 4 · DDNS & metrics | IP discovery, Cloudflare sync, retries, metrics | record follows IP change |
-| 5 · Android integration | Kotlin wrapper, reboot recovery, Keystore master key | survives TV box reboot |
-| 6 · Hardening | integration/security tests, benchmarks, backup/restore, release pipeline | release artifacts for all targets |
-
-### Status of this skeleton
-
-Implemented and tested: config (file/env/flags, strict validation), logging, lifecycle and modes,
-HTTP server + middleware (client IP, rate limits, body limit, CORS, security headers), spec-first
-codegen with spec-derived authorization policy, offline Swagger UI, health/readiness, SQLite +
-migrations + full schema, master key + AES-GCM sealing, agent protocol (sign/verify/replay
-protection), agent listener with idempotency/cooldown and dry-run executor, systemd/polkit power
-adapter, WOL packet + broadcast resolution, TCP probe + hysteresis, command state machine,
-scheduler, gomobile binding surface, `devtools` (keygen, signed send).
-
-Stubbed (`401` until auth lands, then `501`): auth/JWT, device CRUD, monitor job, command
-dispatcher, DDNS, system metrics, controller key management.
+Moved to [plans/roadmap.md](../plans/roadmap.md). Per-requirement status lives in
+[requirements/](../requirements/overview.md).
