@@ -1,0 +1,52 @@
+# HomeCore configuration (all keys optional; values shown are defaults unless noted).
+# Precedence: CLI flags > HOMECORE_* environment variables > this file > built-in defaults.
+# Unknown keys are rejected to catch typos.
+
+mode: controller            # controller | agent | both
+data_dir: /var/lib/homecore # SQLite DB, master.key, agent identity
+shutdown_timeout: 10s
+
+log:
+  level: info               # debug | info | warn | error
+  format: json              # text | json
+
+controller:
+  listen: ":8080"
+  tls:                      # optional; strongly recommended if the API is reachable beyond the LAN
+    cert_file: ""
+    key_file: ""
+  api_docs: true            # serve /api/openapi.json and /api/docs (Swagger UI, offline)
+  trusted_proxies: []       # CIDRs of reverse proxies whose X-Forwarded-For is trusted, e.g. ["127.0.0.1/32"]
+  cors_allowed_origins: []  # exact origins; empty = same-origin only
+  auth:
+    access_token_ttl: 15m
+    refresh_token_ttl: 720h
+    login_rate_per_minute: 10
+    api_rate_per_minute: 600
+    allow_viewer_wake: false
+    bootstrap_admin_user: admin   # created on first run; password from HOMECORE_ADMIN_PASSWORD or logged once
+  monitor:
+    tick: 5s
+    default_interval: 30s
+    default_timeout: 2s
+    concurrency: 8
+    offline_threshold: 2    # consecutive failed probes before a device is marked offline
+  commands:
+    wake_deadline: 180s
+    shutdown_deadline: 120s
+  retention_days: 30
+
+agent:
+  listen: ":9750"           # LAN only. Never port-forward; use a VPN for remote access.
+  data_dir: ""              # default: <data_dir>/agent
+  tls:
+    cert_file: ""
+    key_file: ""
+  allowed_actions: [shutdown]   # shutdown | reboot
+  clock_skew: 30s
+  action_delay: 3s          # reply first, act after this delay
+  cooldown: 60s             # ignore further power actions after one is accepted
+  dry_run: false            # log instead of acting (development)
+  trusted_controllers: []   # public keys allowed to send commands, e.g.:
+  #  - name: livingroom-tvbox
+  #    public_key: "base64-ed25519-public-key"   # from GET /api/v1/system/controller-key

@@ -1,0 +1,18 @@
+// /etc/polkit-1/rules.d/50-homecore-agent.rules  (polkit >= 0.106, JavaScript rules)
+// Allows ONLY the homecore-agent user to power off / reboot via systemd-logind.
+// The agent invokes `systemctl poweroff|reboot`; it never runs as root.
+polkit.addRule(function (action, subject) {
+    if (subject.user !== "homecore-agent") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    var allowed = [
+        "org.freedesktop.login1.power-off",
+        "org.freedesktop.login1.power-off-multiple-sessions",
+        "org.freedesktop.login1.reboot",
+        "org.freedesktop.login1.reboot-multiple-sessions"
+    ];
+    if (allowed.indexOf(action.id) >= 0) {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
+});

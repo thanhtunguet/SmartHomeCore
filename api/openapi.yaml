@@ -1,0 +1,829 @@
+openapi: 3.0.3
+info:
+  title: HomeCore API
+  version: 0.1.0
+  description: |
+    REST API of the HomeCore Controller.
+
+    * All `/api/v1` endpoints require a Bearer JWT unless marked otherwise.
+    * Operations whose security requirement lists `admin` require the admin role.
+    * Wake/shutdown return `202 Accepted` with a command; poll `GET /api/v1/commands/{id}` for the outcome.
+  license:
+    name: Proprietary
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+
+tags:
+  - name: health
+  - name: auth
+  - name: devices
+  - name: commands
+  - name: system
+  - name: ddns
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      operationId: getHealthz
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+
+  /readyz:
+    get:
+      tags: [health]
+      operationId: getReadyz
+      summary: Readiness probe (database reachable, migrations applied)
+      security: []
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Readiness" }
+        "503":
+          description: Not ready
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Readiness" }
+
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Exchange username/password for tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenPair" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [auth]
+      operationId: refreshToken
+      summary: Rotate a refresh token and get a new token pair
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshRequest" }
+      responses:
+        "200":
+          description: New token pair
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenPair" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: Revoke a refresh token family
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshRequest" }
+      responses:
+        "204": { description: Logged out }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/auth/me:
+    get:
+      tags: [auth]
+      operationId: getCurrentUser
+      summary: Current user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/devices:
+    get:
+      tags: [devices]
+      operationId: listDevices
+      summary: List devices
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Devices
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [devices]
+      operationId: createDevice
+      summary: Register a device
+      security:
+        - bearerAuth: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeviceCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/devices/{id}:
+    parameters:
+      - $ref: "#/components/parameters/DeviceId"
+    get:
+      tags: [devices]
+      operationId: getDevice
+      summary: Get a device
+      responses:
+        "200":
+          description: Device
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [devices]
+      operationId: updateDevice
+      summary: Update a device (partial)
+      security:
+        - bearerAuth: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeviceUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [devices]
+      operationId: deleteDevice
+      summary: Delete a device
+      security:
+        - bearerAuth: [admin]
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/devices/{id}/wake:
+    parameters:
+      - $ref: "#/components/parameters/DeviceId"
+    post:
+      tags: [devices, commands]
+      operationId: wakeDevice
+      summary: Send Wake-on-LAN (asynchronous)
+      description: Returns the created command, or the already active wake command for this device.
+      security:
+        - bearerAuth: [admin]
+      responses:
+        "202":
+          description: Wake command accepted (not the same as "device powered on")
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Command" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/devices/{id}/shutdown:
+    parameters:
+      - $ref: "#/components/parameters/DeviceId"
+    post:
+      tags: [devices, commands]
+      operationId: shutdownDevice
+      summary: Request a signed shutdown via the device's agent (asynchronous)
+      security:
+        - bearerAuth: [admin]
+      responses:
+        "202":
+          description: Shutdown command accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Command" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/devices/{id}/probe:
+    parameters:
+      - $ref: "#/components/parameters/DeviceId"
+    post:
+      tags: [devices]
+      operationId: probeDevice
+      summary: Run a TCP probe now
+      responses:
+        "200":
+          description: Probe result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProbeResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/devices/{id}/history:
+    parameters:
+      - $ref: "#/components/parameters/DeviceId"
+    get:
+      tags: [devices]
+      operationId: getDeviceHistory
+      summary: Status transitions of a device
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: History
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusHistory" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/commands:
+    get:
+      tags: [commands]
+      operationId: listCommands
+      summary: Command history
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: device_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/CommandStatus" }
+      responses:
+        "200":
+          description: Commands
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommandList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/commands/{id}:
+    get:
+      tags: [commands]
+      operationId: getCommand
+      summary: Get a command
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Command
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Command" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/system/metrics:
+    get:
+      tags: [system]
+      operationId: getSystemMetrics
+      summary: Metrics of the host running the Controller
+      responses:
+        "200":
+          description: Metrics
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SystemMetrics" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/system/controller-key:
+    get:
+      tags: [system]
+      operationId: getControllerKey
+      summary: Public signing key to paste into an agent's trusted_controllers
+      security:
+        - bearerAuth: [admin]
+      responses:
+        "200":
+          description: Active controller public key
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ControllerKey" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/ddns:
+    get:
+      tags: [ddns]
+      operationId: listDdnsConfigs
+      summary: List DDNS configurations
+      security:
+        - bearerAuth: [admin]
+      responses:
+        "200":
+          description: DDNS configs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/DdnsConfig" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [ddns]
+      operationId: createDdnsConfig
+      summary: Add a DDNS configuration
+      security:
+        - bearerAuth: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DdnsConfigCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DdnsConfig" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/ddns/{id}:
+    parameters:
+      - $ref: "#/components/parameters/DdnsId"
+    patch:
+      tags: [ddns]
+      operationId: updateDdnsConfig
+      summary: Update a DDNS configuration (partial)
+      security:
+        - bearerAuth: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DdnsConfigUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DdnsConfig" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [ddns]
+      operationId: deleteDdnsConfig
+      summary: Delete a DDNS configuration
+      security:
+        - bearerAuth: [admin]
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/ddns/{id}/sync:
+    parameters:
+      - $ref: "#/components/parameters/DdnsId"
+    post:
+      tags: [ddns]
+      operationId: syncDdnsConfig
+      summary: Synchronise one DDNS record now
+      security:
+        - bearerAuth: [admin]
+      responses:
+        "200":
+          description: Sync result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DdnsSyncResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    DeviceId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DdnsId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor returned as `next_cursor` by the previous page.
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or invalid credentials
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Insufficient role
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: Conflict with current state
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooManyRequests:
+      description: Rate limited
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, example: not_found }
+            message: { type: string }
+
+    Health:
+      type: object
+      required: [status, time, version]
+      properties:
+        status: { type: string, example: ok }
+        time:
+          type: string
+          format: date-time
+          description: Server clock; useful to diagnose agent clock_skew errors.
+        version: { type: string }
+
+    Readiness:
+      type: object
+      required: [status, checks]
+      properties:
+        status: { type: string, enum: [ready, not_ready] }
+        checks:
+          type: object
+          additionalProperties: { type: string }
+
+    Role:
+      type: string
+      enum: [admin, viewer]
+
+    User:
+      type: object
+      required: [id, username, role]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1, maxLength: 64 }
+        password: { type: string, minLength: 1, maxLength: 256, format: password }
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string }
+
+    TokenPair:
+      type: object
+      required: [access_token, refresh_token, token_type, expires_in]
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, example: Bearer }
+        expires_in: { type: integer, description: Access token lifetime in seconds }
+
+    DeviceStatus:
+      type: string
+      description: Observed reachability.
+      enum: [unknown, online, offline]
+
+    PowerTransition:
+      type: string
+      description: Derived from the device's active command.
+      enum: [none, waking, shutting_down]
+
+    AgentBinding:
+      type: object
+      required: [agent_id, port]
+      properties:
+        agent_id: { type: string, format: uuid }
+        port: { type: integer, minimum: 1, maximum: 65535, default: 9750 }
+        scheme: { type: string, enum: [http, https], default: http }
+
+    Device:
+      type: object
+      required:
+        [id, name, ip_address, monitor_port, monitor_interval_seconds, monitor_timeout_ms,
+         enabled, status, power_transition, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        hostname: { type: string }
+        ip_address: { type: string }
+        mac_address: { type: string, example: "aa:bb:cc:dd:ee:ff" }
+        wol_broadcast_address: { type: string }
+        wol_port: { type: integer }
+        monitor_port: { type: integer }
+        monitor_interval_seconds: { type: integer }
+        monitor_timeout_ms: { type: integer }
+        enabled: { type: boolean }
+        status: { $ref: "#/components/schemas/DeviceStatus" }
+        power_transition: { $ref: "#/components/schemas/PowerTransition" }
+        agent: { $ref: "#/components/schemas/AgentBinding" }
+        last_seen_at: { type: string, format: date-time }
+        last_checked_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    DeviceCreate:
+      type: object
+      required: [name, ip_address, monitor_port]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 1000 }
+        hostname: { type: string, maxLength: 253 }
+        ip_address: { type: string, maxLength: 253 }
+        mac_address: { type: string }
+        wol_broadcast_address: { type: string }
+        wol_port: { type: integer, minimum: 1, maximum: 65535, default: 9 }
+        monitor_port: { type: integer, minimum: 1, maximum: 65535 }
+        monitor_interval_seconds: { type: integer, minimum: 5, maximum: 3600, default: 30 }
+        monitor_timeout_ms: { type: integer, minimum: 100, maximum: 10000, default: 2000 }
+        enabled: { type: boolean, default: true }
+        agent: { $ref: "#/components/schemas/AgentBinding" }
+
+    DeviceUpdate:
+      type: object
+      description: Partial update; omitted fields are unchanged.
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 1000 }
+        hostname: { type: string, maxLength: 253 }
+        ip_address: { type: string, maxLength: 253 }
+        mac_address: { type: string }
+        wol_broadcast_address: { type: string }
+        wol_port: { type: integer, minimum: 1, maximum: 65535 }
+        monitor_port: { type: integer, minimum: 1, maximum: 65535 }
+        monitor_interval_seconds: { type: integer, minimum: 5, maximum: 3600 }
+        monitor_timeout_ms: { type: integer, minimum: 100, maximum: 10000 }
+        enabled: { type: boolean }
+        agent: { $ref: "#/components/schemas/AgentBinding" }
+
+    DeviceList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Device" }
+        next_cursor: { type: string }
+
+    StatusChange:
+      type: object
+      required: [status, changed_at]
+      properties:
+        status: { $ref: "#/components/schemas/DeviceStatus" }
+        previous_status: { $ref: "#/components/schemas/DeviceStatus" }
+        changed_at: { type: string, format: date-time }
+        reason: { type: string }
+
+    StatusHistory:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/StatusChange" }
+        next_cursor: { type: string }
+
+    ProbeResult:
+      type: object
+      required: [device_id, reachable, status, checked_at]
+      properties:
+        device_id: { type: string, format: uuid }
+        reachable: { type: boolean }
+        latency_ms: { type: integer }
+        status: { $ref: "#/components/schemas/DeviceStatus" }
+        checked_at: { type: string, format: date-time }
+        error: { type: string }
+
+    CommandType:
+      type: string
+      enum: [wake, shutdown]
+
+    CommandStatus:
+      type: string
+      enum: [pending, sent, acknowledged, completed, failed, timed_out]
+
+    Command:
+      type: object
+      required: [id, device_id, type, status, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        device_id: { type: string, format: uuid }
+        type: { $ref: "#/components/schemas/CommandType" }
+        status: { $ref: "#/components/schemas/CommandStatus" }
+        requested_by: { type: string, format: uuid }
+        error_code: { type: string }
+        error: { type: string }
+        deadline_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CommandList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Command" }
+        next_cursor: { type: string }
+
+    SystemMetrics:
+      type: object
+      required: [collected_at, platform]
+      properties:
+        collected_at: { type: string, format: date-time }
+        platform: { type: string, example: linux/arm64 }
+        hostname: { type: string }
+        uptime_seconds: { type: integer, format: int64 }
+        cpu_percent: { type: number, format: double }
+        memory:
+          type: object
+          properties:
+            total_bytes: { type: integer, format: int64 }
+            available_bytes: { type: integer, format: int64 }
+            used_bytes: { type: integer, format: int64 }
+        disk:
+          type: object
+          properties:
+            path: { type: string }
+            total_bytes: { type: integer, format: int64 }
+            free_bytes: { type: integer, format: int64 }
+            used_bytes: { type: integer, format: int64 }
+        local_ips:
+          type: array
+          items: { type: string }
+        process:
+          type: object
+          properties:
+            rss_bytes: { type: integer, format: int64 }
+            goroutines: { type: integer }
+            heap_alloc_bytes: { type: integer, format: int64 }
+
+    ControllerKey:
+      type: object
+      required: [key_id, algorithm, public_key]
+      properties:
+        key_id: { type: string, example: 3f9a0c1d2b4e5f60 }
+        algorithm: { type: string, enum: [ed25519] }
+        public_key: { type: string, description: Standard base64 of the 32-byte public key }
+
+    DnsRecordType:
+      type: string
+      enum: [A, AAAA]
+
+    DdnsConfig:
+      type: object
+      required: [id, name, zone_id, record_name, record_type, proxied, ttl, interval_seconds, enabled, has_api_token, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        zone_id: { type: string }
+        record_name: { type: string, example: home.example.com }
+        record_type: { $ref: "#/components/schemas/DnsRecordType" }
+        proxied: { type: boolean }
+        ttl: { type: integer, description: "1 = automatic" }
+        interval_seconds: { type: integer }
+        enabled: { type: boolean }
+        has_api_token: { type: boolean, description: The token itself is never returned. }
+        last_ip: { type: string }
+        last_synced_at: { type: string, format: date-time }
+        last_error: { type: string }
+        last_error_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    DdnsConfigCreate:
+      type: object
+      required: [name, zone_id, record_name, record_type, api_token]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        zone_id: { type: string, minLength: 1 }
+        record_name: { type: string, minLength: 1, maxLength: 253 }
+        record_type: { $ref: "#/components/schemas/DnsRecordType" }
+        proxied: { type: boolean, default: false }
+        ttl: { type: integer, minimum: 1, maximum: 86400, default: 1 }
+        interval_seconds: { type: integer, minimum: 60, maximum: 86400, default: 300 }
+        enabled: { type: boolean, default: true }
+        api_token: { type: string, writeOnly: true, description: "Cloudflare API token scoped to Zone:DNS:Edit" }
+
+    DdnsConfigUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        zone_id: { type: string, minLength: 1 }
+        record_name: { type: string, minLength: 1, maxLength: 253 }
+        record_type: { $ref: "#/components/schemas/DnsRecordType" }
+        proxied: { type: boolean }
+        ttl: { type: integer, minimum: 1, maximum: 86400 }
+        interval_seconds: { type: integer, minimum: 60, maximum: 86400 }
+        enabled: { type: boolean }
+        api_token: { type: string, writeOnly: true }
+
+    DdnsSyncResult:
+      type: object
+      required: [config_id, result, synced_at]
+      properties:
+        config_id: { type: string, format: uuid }
+        result: { type: string, enum: [updated, unchanged, failed] }
+        ip: { type: string }
+        error: { type: string }
+        synced_at: { type: string, format: date-time }

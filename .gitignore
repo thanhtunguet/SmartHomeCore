@@ -1,0 +1,18 @@
+# Build outputs
+/build/
+*.aar
+coverage.out
+
+# Local runtime data (DB, master key, agent identity)
+/data/
+*.db
+*.db-wal
+*.db-shm
+master.key
+*.key
+
+# Environment / editor
+.env
+.DS_Store
+.idea/
+.vscode/

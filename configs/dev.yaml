@@ -1,0 +1,13 @@
+# Local development config used by `make run`, `make run-agent`, `make run-both`.
+mode: controller
+data_dir: ./data
+log:
+  level: debug
+  format: text
+controller:
+  listen: "127.0.0.1:8080"
+agent:
+  listen: "127.0.0.1:9750"
+  dry_run: true             # never actually power off the dev machine
+  action_delay: 1s
+  trusted_controllers: []   # add a key from `build/devtools keygen` to test signed commands

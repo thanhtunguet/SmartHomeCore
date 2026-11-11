@@ -1,0 +1,9 @@
+# oapi-codegen configuration. Regenerate with `make generate` (or `go generate ./...`).
+package: gen
+output: api.gen.go
+generate:
+  models: true
+  chi-server: true
+  embedded-spec: true
+output-options:
+  skip-prune: true
