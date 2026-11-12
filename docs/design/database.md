@@ -3,10 +3,10 @@
 | | |
 |---|---|
 | Engine | SQLite 3 (embedded) via `modernc.org/sqlite` (pure Go, [ADR-004](decisions.md#adr-004--sqlite-driver-moderncorgsqlite-everywhere)) |
-| Schema version | `1` (`internal/storage/migrations/0001_init.sql`) |
+| Schema version | `2` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`) |
 | Owner role | Controller only. The Agent has no database |
 | Requirements | [storage-and-secrets.md](../requirements/storage-and-secrets.md) |
-| Last reviewed | 2026-11-11 |
+| Last reviewed | 2026-11-12 |
 
 The DDL in `internal/storage/migrations/` is authoritative. This document explains it and must be
 updated in the same change as any new migration.
@@ -124,9 +124,12 @@ The device registry. Identity is `id`; addresses are mutable attributes (ADR-002
 | `monitor_interval_seconds` | INTEGER | no | `30` | 5–3600 |
 | `monitor_timeout_ms` | INTEGER | no | `2000` | 100–10000 |
 | `enabled` | INTEGER | no | `1` | bool; disabled devices are not probed |
+| `device_type` | TEXT | no | `'desktop'` | `desktop` \| `server` \| `laptop` \| `tv` \| `nas` \| `iot` \| `router`; informational (0002) |
+| `os` | TEXT | no | `'linux'` | `windows` \| `linux` \| `macos` \| `android` \| `freebsd` \| `embedded`; informational (0002) |
 | `status` | TEXT | no | `'unknown'` | `unknown` \| `online` \| `offline` (observed only) |
 | `last_seen_at` | INTEGER | yes | | last successful probe |
 | `last_checked_at` | INTEGER | yes | | last probe of any result |
+| `last_latency_ms` | INTEGER | yes | | connect time of the last successful probe (0002); written by the monitor |
 | `created_at`, `updated_at` | INTEGER | no | | |
 
 `power_transition` (`none`/`waking`/`shutting_down`) is **not stored**. It is derived from the

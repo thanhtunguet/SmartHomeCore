@@ -168,3 +168,44 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// NotImplementedEnvelope makes a bare `501` (what gen.Unimplemented writes) carry the standard
+// error envelope, so REQ-API-001 holds for operations that are documented but not built yet.
+// A handler that already set a Content-Type (for example via httpx.WriteError) is left alone.
+func NotImplementedEnvelope(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(&notImplementedWriter{ResponseWriter: w}, r)
+	})
+}
+
+type notImplementedWriter struct {
+	http.ResponseWriter
+	wrote   bool
+	swapped bool // envelope written; discard anything the handler writes afterwards
+}
+
+func (w *notImplementedWriter) WriteHeader(status int) {
+	if w.wrote {
+		return
+	}
+	w.wrote = true
+	if status == http.StatusNotImplemented && w.Header().Get("Content-Type") == "" {
+		w.swapped = true
+		httpx.WriteError(w.ResponseWriter, status, "not_implemented", "this operation is not implemented yet")
+		return
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *notImplementedWriter) Write(b []byte) (int, error) {
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
+	}
+	if w.swapped {
+		return len(b), nil
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (w *notImplementedWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }

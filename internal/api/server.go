@@ -35,6 +35,7 @@ const (
 // Deps are the Controller API dependencies.
 type Deps struct {
 	Config          config.Controller
+	Mode            config.Mode // reported by GET /system/info; empty is shown as "controller"
 	ShutdownTimeout time.Duration
 	Log             *slog.Logger
 	DB              *storage.DB
@@ -124,9 +125,11 @@ func newRouter(d Deps) (http.Handler, error) {
 		r.Handle("/api/docs/*", http.StripPrefix("/api/docs/", http.FileServerFS(web.Swagger())))
 	}
 
-	gen.HandlerWithOptions(handlers.New(d.DB, d.Log), gen.ChiServerOptions{
+	h := handlers.New(d.DB, d.Log)
+	h.Info = handlers.InfoSource{Mode: string(d.Mode), Controller: d.Config}
+	gen.HandlerWithOptions(h, gen.ChiServerOptions{
 		BaseRouter:  r,
-		Middlewares: []gen.MiddlewareFunc{middleware.Authorize(policy, d.Authn, d.Log)},
+		Middlewares: []gen.MiddlewareFunc{middleware.Authorize(policy, d.Authn, d.Log), middleware.NotImplementedEnvelope},
 		ErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) {
 			httpx.WriteError(w, http.StatusBadRequest, "bad_request", err.Error())
 		},
@@ -157,9 +160,22 @@ func staticHandler(files fs.FS) http.HandlerFunc {
 			name = "."
 		}
 		if _, err := fs.Stat(files, name); errors.Is(err, fs.ErrNotExist) {
+			setStaticCacheHeaders(w, "index.html")
 			http.ServeFileFS(w, r, files, "index.html")
 			return
 		}
+		setStaticCacheHeaders(w, name)
 		fileServer.ServeHTTP(w, r)
 	}
+}
+
+// setStaticCacheHeaders: Vite emits content-hashed names under assets/, which never change, so
+// they can be cached forever. Everything else (index.html, the SPA fallback) must be revalidated
+// so a new build is picked up. Embedded files have no mod-time, hence no Last-Modified/ETag.
+func setStaticCacheHeaders(w http.ResponseWriter, name string) {
+	if strings.HasPrefix(name, "assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
 }

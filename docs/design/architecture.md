@@ -322,18 +322,22 @@ Namespace `/api/v1`; full contract in `api/openapi.yaml`. Summary (brief §4, pl
 | GET | ✚`/api/v1/auth/me` | user |
 | GET/POST | `/api/v1/devices` | user / admin |
 | GET/PATCH/DELETE | `/api/v1/devices/{id}` | user / admin / admin |
+| ✚DELETE | `/api/v1/devices/{id}/agent` | admin |
 | POST | `/api/v1/devices/{id}/wake` | admin (✚ viewers can wake if `allow_viewer_wake`) |
 | POST | `/api/v1/devices/{id}/shutdown` | **admin** |
 | POST | `/api/v1/devices/{id}/probe` | user |
 | GET | `/api/v1/devices/{id}/history` | user |
 | GET | `/api/v1/commands` · ✚`/commands/{id}` | user |
-| GET | `/api/v1/system/metrics` | user |
+| GET | `/api/v1/system/metrics` · ✚`/system/info` | user |
 | GET/POST | `/api/v1/ddns` | admin |
 | ✚PATCH/DELETE | `/api/v1/ddns/{id}` | admin |
 | POST | `/api/v1/ddns/{id}/sync` | admin |
 | GET | `/healthz`, `/readyz`, `/api/openapi.json`, `/api/docs` | public |
 
-Pagination: `?limit=&cursor=` (cursor = opaque, UUIDv7-based). Times: RFC 3339 UTC in JSON.
+Pagination: `?limit=&cursor=` (cursor = opaque, UUIDv7-based), no total count. Order is fixed:
+devices by name (case-insensitive), commands and status history newest first. Times: RFC 3339 UTC
+in JSON. On `PATCH /devices/{id}` an empty string clears an optional text field; the agent binding
+is removed with `DELETE /devices/{id}/agent`.
 
 ---
 

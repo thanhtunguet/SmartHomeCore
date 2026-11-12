@@ -144,6 +144,39 @@ func (e DeviceStatus) Valid() bool {
 	}
 }
 
+// Defines values for DeviceType.
+const (
+	Desktop DeviceType = "desktop"
+	Iot     DeviceType = "iot"
+	Laptop  DeviceType = "laptop"
+	Nas     DeviceType = "nas"
+	Router  DeviceType = "router"
+	Server  DeviceType = "server"
+	Tv      DeviceType = "tv"
+)
+
+// Valid indicates whether the value is a known member of the DeviceType enum.
+func (e DeviceType) Valid() bool {
+	switch e {
+	case Desktop:
+		return true
+	case Iot:
+		return true
+	case Laptop:
+		return true
+	case Nas:
+		return true
+	case Router:
+		return true
+	case Server:
+		return true
+	case Tv:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DnsRecordType.
 const (
 	A    DnsRecordType = "A"
@@ -156,6 +189,36 @@ func (e DnsRecordType) Valid() bool {
 	case A:
 		return true
 	case AAAA:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OperatingSystem.
+const (
+	Android  OperatingSystem = "android"
+	Embedded OperatingSystem = "embedded"
+	Freebsd  OperatingSystem = "freebsd"
+	Linux    OperatingSystem = "linux"
+	Macos    OperatingSystem = "macos"
+	Windows  OperatingSystem = "windows"
+)
+
+// Valid indicates whether the value is a known member of the OperatingSystem enum.
+func (e OperatingSystem) Valid() bool {
+	switch e {
+	case Android:
+		return true
+	case Embedded:
+		return true
+	case Freebsd:
+		return true
+	case Linux:
+		return true
+	case Macos:
+		return true
+	case Windows:
 		return true
 	default:
 		return false
@@ -219,6 +282,27 @@ func (e Role) Valid() bool {
 	}
 }
 
+// Defines values for SystemInfoMode.
+const (
+	Agent      SystemInfoMode = "agent"
+	Both       SystemInfoMode = "both"
+	Controller SystemInfoMode = "controller"
+)
+
+// Valid indicates whether the value is a known member of the SystemInfoMode enum.
+func (e SystemInfoMode) Valid() bool {
+	switch e {
+	case Agent:
+		return true
+	case Both:
+		return true
+	case Controller:
+		return true
+	default:
+		return false
+	}
+}
+
 // AgentBinding defines model for AgentBinding.
 type AgentBinding struct {
 	AgentId openapi_types.UUID  `json:"agent_id"`
@@ -229,13 +313,29 @@ type AgentBinding struct {
 // AgentBindingScheme defines model for AgentBinding.Scheme.
 type AgentBindingScheme string
 
-// Command defines model for Command.
+// Command Asynchronous wake or shutdown. Terminal statuses: `completed`, `failed`, `timed_out`.
+//
+// | status | wake | shutdown |
+// |---|---|---|
+// | `pending` | created | created |
+// | `sent` | magic packet sent | signed request delivered to the agent's address |
+// | `acknowledged` | not used | agent answered `202`/`200` |
+// | `completed` | monitor saw the device online | monitor saw the device offline |
+// | `failed` | packet could not be sent | dispatch failed or the agent rejected it (`error_code`) |
+// | `timed_out` | `deadline_at` passed, device not seen online | `deadline_at` passed, device not seen offline |
 type Command struct {
-	CompletedAt *time.Time          `json:"completed_at,omitempty"`
-	CreatedAt   time.Time           `json:"created_at"`
-	DeadlineAt  *time.Time          `json:"deadline_at,omitempty"`
-	DeviceId    openapi_types.UUID  `json:"device_id"`
-	Error       *string             `json:"error,omitempty"`
+	CompletedAt *time.Time         `json:"completed_at,omitempty"`
+	CreatedAt   time.Time          `json:"created_at"`
+	DeadlineAt  *time.Time         `json:"deadline_at,omitempty"`
+	DeviceId    openapi_types.UUID `json:"device_id"`
+
+	// Error Human-readable failure text.
+	Error *string `json:"error,omitempty"`
+
+	// ErrorCode Machine-readable failure reason, present when `status` is `failed`. Values returned by the
+	// agent (`unauthorized`, `bad_request`, `wrong_agent`, `action_not_allowed`, `clock_skew`,
+	// `stale`, `replay`, `busy`) are passed through; the Controller may add its own, so clients
+	// must tolerate unknown values and fall back to `error`.
 	ErrorCode   *string             `json:"error_code,omitempty"`
 	Id          openapi_types.UUID  `json:"id"`
 	RequestedBy *openapi_types.UUID `json:"requested_by,omitempty"`
@@ -273,18 +373,29 @@ type ControllerKeyAlgorithm string
 // DdnsConfig defines model for DdnsConfig.
 type DdnsConfig struct {
 	CreatedAt time.Time `json:"created_at"`
-	Enabled   bool      `json:"enabled"`
+
+	// DetectedIp Public address found by the most recent discovery run.
+	DetectedIp *string `json:"detected_ip,omitempty"`
+
+	// DnsValue Content of the Cloudflare record as last read.
+	DnsValue *string `json:"dns_value,omitempty"`
+	Enabled  bool    `json:"enabled"`
 
 	// HasApiToken The token itself is never returned.
 	HasApiToken     bool               `json:"has_api_token"`
 	Id              openapi_types.UUID `json:"id"`
 	IntervalSeconds int                `json:"interval_seconds"`
-	LastError       *string            `json:"last_error,omitempty"`
-	LastErrorAt     *time.Time         `json:"last_error_at,omitempty"`
-	LastIp          *string            `json:"last_ip,omitempty"`
-	LastSyncedAt    *time.Time         `json:"last_synced_at,omitempty"`
-	Name            string             `json:"name"`
-	Proxied         bool               `json:"proxied"`
+
+	// LastCheckedAt Last discovery/comparison run
+	LastCheckedAt *time.Time `json:"last_checked_at,omitempty"`
+	LastError     *string    `json:"last_error,omitempty"`
+	LastErrorAt   *time.Time `json:"last_error_at,omitempty"`
+
+	// LastIp Address the Controller last pushed to Cloudflare.
+	LastIp       *string    `json:"last_ip,omitempty"`
+	LastSyncedAt *time.Time `json:"last_synced_at,omitempty"`
+	Name         string     `json:"name"`
+	Proxied      bool       `json:"proxied"`
 
 	// RecordName Example: home.example.com
 	RecordName string        `json:"record_name"`
@@ -337,15 +448,21 @@ type DdnsSyncResultResult string
 
 // Device defines model for Device.
 type Device struct {
-	Agent         *AgentBinding      `json:"agent,omitempty"`
-	CreatedAt     time.Time          `json:"created_at"`
-	Description   *string            `json:"description,omitempty"`
+	Agent       *AgentBinding `json:"agent,omitempty"`
+	CreatedAt   time.Time     `json:"created_at"`
+	Description *string       `json:"description,omitempty"`
+
+	// DeviceType Kind of machine; used by clients for icons and labels only.
+	DeviceType    *DeviceType        `json:"device_type,omitempty"`
 	Enabled       bool               `json:"enabled"`
 	Hostname      *string            `json:"hostname,omitempty"`
 	Id            openapi_types.UUID `json:"id"`
 	IpAddress     string             `json:"ip_address"`
 	LastCheckedAt *time.Time         `json:"last_checked_at,omitempty"`
-	LastSeenAt    *time.Time         `json:"last_seen_at,omitempty"`
+
+	// LastLatencyMs Connect time of the most recent successful probe; absent until one succeeded.
+	LastLatencyMs *int       `json:"last_latency_ms,omitempty"`
+	LastSeenAt    *time.Time `json:"last_seen_at,omitempty"`
 
 	// MacAddress Example: aa:bb:cc:dd:ee:ff
 	MacAddress             *string `json:"mac_address,omitempty"`
@@ -353,6 +470,9 @@ type Device struct {
 	MonitorPort            int     `json:"monitor_port"`
 	MonitorTimeoutMs       int     `json:"monitor_timeout_ms"`
 	Name                   string  `json:"name"`
+
+	// Os Operating system family; informational only.
+	Os *OperatingSystem `json:"os,omitempty"`
 
 	// PowerTransition Derived from the device's active command.
 	PowerTransition PowerTransition `json:"power_transition"`
@@ -366,18 +486,24 @@ type Device struct {
 
 // DeviceCreate defines model for DeviceCreate.
 type DeviceCreate struct {
-	Agent                  *AgentBinding `json:"agent,omitempty"`
-	Description            *string       `json:"description,omitempty"`
-	Enabled                *bool         `json:"enabled,omitempty"`
-	Hostname               *string       `json:"hostname,omitempty"`
-	IpAddress              string        `json:"ip_address"`
-	MacAddress             *string       `json:"mac_address,omitempty"`
-	MonitorIntervalSeconds *int          `json:"monitor_interval_seconds,omitempty"`
-	MonitorPort            int           `json:"monitor_port"`
-	MonitorTimeoutMs       *int          `json:"monitor_timeout_ms,omitempty"`
-	Name                   string        `json:"name"`
-	WolBroadcastAddress    *string       `json:"wol_broadcast_address,omitempty"`
-	WolPort                *int          `json:"wol_port,omitempty"`
+	Agent       *AgentBinding `json:"agent,omitempty"`
+	Description *string       `json:"description,omitempty"`
+
+	// DeviceType Kind of machine; used by clients for icons and labels only.
+	DeviceType             *DeviceType `json:"device_type,omitempty"`
+	Enabled                *bool       `json:"enabled,omitempty"`
+	Hostname               *string     `json:"hostname,omitempty"`
+	IpAddress              string      `json:"ip_address"`
+	MacAddress             *string     `json:"mac_address,omitempty"`
+	MonitorIntervalSeconds *int        `json:"monitor_interval_seconds,omitempty"`
+	MonitorPort            int         `json:"monitor_port"`
+	MonitorTimeoutMs       *int        `json:"monitor_timeout_ms,omitempty"`
+	Name                   string      `json:"name"`
+
+	// Os Operating system family; informational only.
+	Os                  *OperatingSystem `json:"os,omitempty"`
+	WolBroadcastAddress *string          `json:"wol_broadcast_address,omitempty"`
+	WolPort             *int             `json:"wol_port,omitempty"`
 }
 
 // DeviceList defines model for DeviceList.
@@ -389,20 +515,30 @@ type DeviceList struct {
 // DeviceStatus Observed reachability.
 type DeviceStatus string
 
-// DeviceUpdate Partial update; omitted fields are unchanged.
+// DeviceType Kind of machine; used by clients for icons and labels only.
+type DeviceType string
+
+// DeviceUpdate Partial update; omitted fields are unchanged. Send `""` to clear `description`, `hostname`,
+// `mac_address` or `wol_broadcast_address`. Use `DELETE /devices/{id}/agent` to unbind the agent.
 type DeviceUpdate struct {
-	Agent                  *AgentBinding `json:"agent,omitempty"`
-	Description            *string       `json:"description,omitempty"`
-	Enabled                *bool         `json:"enabled,omitempty"`
-	Hostname               *string       `json:"hostname,omitempty"`
-	IpAddress              *string       `json:"ip_address,omitempty"`
-	MacAddress             *string       `json:"mac_address,omitempty"`
-	MonitorIntervalSeconds *int          `json:"monitor_interval_seconds,omitempty"`
-	MonitorPort            *int          `json:"monitor_port,omitempty"`
-	MonitorTimeoutMs       *int          `json:"monitor_timeout_ms,omitempty"`
-	Name                   *string       `json:"name,omitempty"`
-	WolBroadcastAddress    *string       `json:"wol_broadcast_address,omitempty"`
-	WolPort                *int          `json:"wol_port,omitempty"`
+	Agent       *AgentBinding `json:"agent,omitempty"`
+	Description *string       `json:"description,omitempty"`
+
+	// DeviceType Kind of machine; used by clients for icons and labels only.
+	DeviceType             *DeviceType `json:"device_type,omitempty"`
+	Enabled                *bool       `json:"enabled,omitempty"`
+	Hostname               *string     `json:"hostname,omitempty"`
+	IpAddress              *string     `json:"ip_address,omitempty"`
+	MacAddress             *string     `json:"mac_address,omitempty"`
+	MonitorIntervalSeconds *int        `json:"monitor_interval_seconds,omitempty"`
+	MonitorPort            *int        `json:"monitor_port,omitempty"`
+	MonitorTimeoutMs       *int        `json:"monitor_timeout_ms,omitempty"`
+	Name                   *string     `json:"name,omitempty"`
+
+	// Os Operating system family; informational only.
+	Os                  *OperatingSystem `json:"os,omitempty"`
+	WolBroadcastAddress *string          `json:"wol_broadcast_address,omitempty"`
+	WolPort             *int             `json:"wol_port,omitempty"`
 }
 
 // DnsRecordType defines model for DnsRecordType.
@@ -432,6 +568,9 @@ type LoginRequest struct {
 	Password string `json:"password"`
 	Username string `json:"username"`
 }
+
+// OperatingSystem Operating system family; informational only.
+type OperatingSystem string
 
 // PowerTransition Derived from the device's active command.
 type PowerTransition string
@@ -483,9 +622,36 @@ type StatusHistory struct {
 	NextCursor *string        `json:"next_cursor,omitempty"`
 }
 
+// SystemInfo defines model for SystemInfo.
+type SystemInfo struct {
+	AccessTokenTtlSeconds *int  `json:"access_token_ttl_seconds,omitempty"`
+	ApiDocs               *bool `json:"api_docs,omitempty"`
+	CommandDeadlines      *struct {
+		ShutdownSeconds *int `json:"shutdown_seconds,omitempty"`
+		WakeSeconds     *int `json:"wake_seconds,omitempty"`
+	} `json:"command_deadlines,omitempty"`
+
+	// Listen Example: :8080
+	Listen          *string        `json:"listen,omitempty"`
+	Mode            SystemInfoMode `json:"mode"`
+	MonitorDefaults *struct {
+		IntervalSeconds  *int `json:"interval_seconds,omitempty"`
+		OfflineThreshold *int `json:"offline_threshold,omitempty"`
+		TimeoutMs        *int `json:"timeout_ms,omitempty"`
+	} `json:"monitor_defaults,omitempty"`
+	RefreshTokenTtlSeconds *int   `json:"refresh_token_ttl_seconds,omitempty"`
+	RetentionDays          *int   `json:"retention_days,omitempty"`
+	Tls                    *bool  `json:"tls,omitempty"`
+	Version                string `json:"version"`
+}
+
+// SystemInfoMode defines model for SystemInfo.Mode.
+type SystemInfoMode string
+
 // SystemMetrics defines model for SystemMetrics.
 type SystemMetrics struct {
 	CollectedAt time.Time `json:"collected_at"`
+	CpuCores    *int      `json:"cpu_cores,omitempty"`
 	CpuPercent  *float64  `json:"cpu_percent,omitempty"`
 	Disk        *struct {
 		FreeBytes  *int64  `json:"free_bytes,omitempty"`
@@ -493,9 +659,15 @@ type SystemMetrics struct {
 		TotalBytes *int64  `json:"total_bytes,omitempty"`
 		UsedBytes  *int64  `json:"used_bytes,omitempty"`
 	} `json:"disk,omitempty"`
-	Hostname *string   `json:"hostname,omitempty"`
-	LocalIps *[]string `json:"local_ips,omitempty"`
-	Memory   *struct {
+	Hostname *string `json:"hostname,omitempty"`
+
+	// Kernel Example: 5.15.0-1052-raspi
+	Kernel *string `json:"kernel,omitempty"`
+
+	// LoadAverage 1, 5 and 15 minute load averages; absent where the OS has none.
+	LoadAverage *[]float64 `json:"load_average,omitempty"`
+	LocalIps    *[]string  `json:"local_ips,omitempty"`
+	Memory      *struct {
 		AvailableBytes *int64 `json:"available_bytes,omitempty"`
 		TotalBytes     *int64 `json:"total_bytes,omitempty"`
 		UsedBytes      *int64 `json:"used_bytes,omitempty"`
@@ -506,9 +678,14 @@ type SystemMetrics struct {
 	Process  *struct {
 		Goroutines     *int   `json:"goroutines,omitempty"`
 		HeapAllocBytes *int64 `json:"heap_alloc_bytes,omitempty"`
+		Pid            *int   `json:"pid,omitempty"`
 		RssBytes       *int64 `json:"rss_bytes,omitempty"`
+		UptimeSeconds  *int64 `json:"uptime_seconds,omitempty"`
 	} `json:"process,omitempty"`
-	UptimeSeconds *int64 `json:"uptime_seconds,omitempty"`
+
+	// Restricted Metric names the platform does not expose (for example on Android), so clients can explain why they are missing.
+	Restricted    *[]string `json:"restricted,omitempty"`
+	UptimeSeconds *int64    `json:"uptime_seconds,omitempty"`
 }
 
 // TokenPair defines model for TokenPair.
@@ -657,6 +834,9 @@ type ServerInterface interface {
 	// UpdateDevice Update a device (partial)
 	// (PATCH /api/v1/devices/{id})
 	UpdateDevice(w http.ResponseWriter, r *http.Request, id DeviceId)
+	// RemoveDeviceAgent Remove the agent binding (remote shutdown no longer possible)
+	// (DELETE /api/v1/devices/{id}/agent)
+	RemoveDeviceAgent(w http.ResponseWriter, r *http.Request, id DeviceId)
 	// GetDeviceHistory Status transitions of a device
 	// (GET /api/v1/devices/{id}/history)
 	GetDeviceHistory(w http.ResponseWriter, r *http.Request, id DeviceId, params GetDeviceHistoryParams)
@@ -672,6 +852,9 @@ type ServerInterface interface {
 	// GetControllerKey Public signing key to paste into an agent's trusted_controllers
 	// (GET /api/v1/system/controller-key)
 	GetControllerKey(w http.ResponseWriter, r *http.Request)
+	// GetSystemInfo Read-only Controller information and effective defaults
+	// (GET /api/v1/system/info)
+	GetSystemInfo(w http.ResponseWriter, r *http.Request)
 	// GetSystemMetrics Metrics of the host running the Controller
 	// (GET /api/v1/system/metrics)
 	GetSystemMetrics(w http.ResponseWriter, r *http.Request)
@@ -783,6 +966,12 @@ func (_ Unimplemented) UpdateDevice(w http.ResponseWriter, r *http.Request, id D
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// RemoveDeviceAgent Remove the agent binding (remote shutdown no longer possible)
+// (DELETE /api/v1/devices/{id}/agent)
+func (_ Unimplemented) RemoveDeviceAgent(w http.ResponseWriter, r *http.Request, id DeviceId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetDeviceHistory Status transitions of a device
 // (GET /api/v1/devices/{id}/history)
 func (_ Unimplemented) GetDeviceHistory(w http.ResponseWriter, r *http.Request, id DeviceId, params GetDeviceHistoryParams) {
@@ -810,6 +999,12 @@ func (_ Unimplemented) WakeDevice(w http.ResponseWriter, r *http.Request, id Dev
 // GetControllerKey Public signing key to paste into an agent's trusted_controllers
 // (GET /api/v1/system/controller-key)
 func (_ Unimplemented) GetControllerKey(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetSystemInfo Read-only Controller information and effective defaults
+// (GET /api/v1/system/info)
+func (_ Unimplemented) GetSystemInfo(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1238,6 +1433,32 @@ func (siw *ServerInterfaceWrapper) UpdateDevice(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// RemoveDeviceAgent operation middleware
+func (siw *ServerInterfaceWrapper) RemoveDeviceAgent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id DeviceId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveDeviceAgent(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetDeviceHistory operation middleware
 func (siw *ServerInterfaceWrapper) GetDeviceHistory(w http.ResponseWriter, r *http.Request) {
 
@@ -1376,6 +1597,20 @@ func (siw *ServerInterfaceWrapper) GetControllerKey(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetControllerKey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSystemInfo operation middleware
+func (siw *ServerInterfaceWrapper) GetSystemInfo(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSystemInfo(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1574,6 +1809,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Patch(options.BaseURL+"/api/v1/devices/{id}", wrapper.UpdateDevice)
 	})
 	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/devices/{id}/agent", wrapper.RemoveDeviceAgent)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/devices/{id}/wake", wrapper.WakeDevice)
 	})
 	r.Group(func(r chi.Router) {
@@ -1593,6 +1831,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/system/metrics", wrapper.GetSystemMetrics)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/system/info", wrapper.GetSystemInfo)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/system/controller-key", wrapper.GetControllerKey)
@@ -1621,70 +1862,104 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"7Fx7c9s4kv8qKNxV7cwVY8nPu2jq/nCczCR7mYzLdipVl6RkiGhJWJEAA4C2NSl/9ys8+JJA6hFLydzu",
-	"X7ZIoIHu/nWjG2jwK45FmgkOXCs8+IozIkkKGqT9dZFLJaT5j4KKJcs0ExwP8B8Z+ZIDiu1rJEHnkgNF",
-	"RKFbDg966F7cotEc6SmgTMIdE7lCGZnAAY4wM0S+5CDnOMKcpIAH2PXBEVbxFFJiBtXzzLxRWjI+wY+P",
-	"EX5JuXpDzTtLIiN6WlFgFEdYwpecSaB4oGUOdWpjIVOi8QDnuW0ZoA53LIbd0X/LUqZL4gv8J/ZlnSCF",
-	"MckTjQen/Qin5IGleYoHR33zi3H367Ach3ENE5D40YwkQWWCK7BafEHoFXzJQdmxY8E1cPsvybKExcQo",
-	"tfcPZTT7tTb8v0sY4wH+t16FkJ57q3qvpBR+qCYy3vA7kjCKpB/wMcIXgo8TFu9h8GIkdM/01KBTAtdI",
-	"aaLBTORXIUeMUuD7EIPKx2MWMzMBKRI7/juhfxU5p7sf/p3QaGyHeozwjRC/Ez73EFC7H/2KaEAWzmAn",
-	"8J6TXE+FZH/CHnj/nSnF+AQJiZgHYyyBAteMJMraoadhhjifANcvGKfGRo3/kyIDqZmzHGLeDhldw7wj",
-	"nAmpG2b7/D8bhnt2enp82m26fmrQIIOnWmc4wsBNr4/FT/NH4c8hP1P5qI8VC36CVQcx+gfE3kLTlHC6",
-	"zL+RewIa6JDohgwo0fBMsxRCgoglkE37UCA0YRw27GT89br6AYuYwdeWN8NYUAi+XpO+d3lAh6P5Wh2M",
-	"Y8rVKqB75Vy7xo8FnbU63ZimjxHOM7qhRhZQZBmoxO2blyw0dN4YrgNub5nSy5BjGtLmP2vwWYkFEynJ",
-	"3PyuBSLhWKLBnx2sY7LXpa4KM8zAOY0IK+CGaxLPuLhPgE7ASKi0HRzhMWGJ/ccImw5FrgOGG+G61moj",
-	"3ZOZlfU011Tc85auXEuRJCD/B+YBR5ZMhGR6mtbpAj06PT18HqQ3g7m3K3gghhE8wMfj56QfH9Kj0Qmc",
-	"js/6QSeYjxIWD2duEk3PfK0Jp0RSNCIKzk6QGNvo8Pjo2WiuAbmuyHRdBUc/u6jGV2PokCJN6GgCBBbw",
-	"89t4LOBklLgFzb8bCZEA4ebllKghydhQixnwZUncTAHZV4hpBckYMYU43EEVSx/gKEB2TU9k1hN5R5Kh",
-	"glhwqmpzrC01CVF62O4Uq9cbicV2Y1k7STXn8YaidhFygGAmxQNr04GEWEg6LDpXOJ6KFA78z4NYpGFn",
-	"bjuv42tfcnVlWxfeVutkWeWH6L8RybVIiWYxDi39mzvpCP8peLH+reHArSiqTk0RNXmuZOv4CYCqMoFF",
-	"vG+2HFSGeWF7BbxXuyVdJCKn44RIQOeXb7xRqVhkQJEW6H8Fh8HLd9eDV9QmV00hRfheMg1/8GTu0rmm",
-	"WZcRmMv0AuYYsLOy03G/Hvz919lJI28764cgUGA1JQ9vgU/0FA8Ofbfyd9RpBuXwY5Ko4KQXzKI21NHp",
-	"8cqhnsQu/BQPO+QTDI5raO+c5gL2N4J9hbVurL63oF6B1Y3gth6+9o6oHxBBO0NNUN/Xcx5fgbKQXU6Q",
-	"DBa+PQNpWTBlOWwRs3lfarwqj6eET+rxZSiQ23i5XTCeisNyOnWiQSOxeUJLNr1K542EfOtksrZEfN00",
-	"dBNKtwYc6wZg2ZBQKkGp9jgonkI825Ax21EB8I16pSSuT6cKhAgZjEaDOB5QOgAYjMfB3oIzLeRwvaCy",
-	"aF1shrS3MLMVuR6mLZTagz5xD3KoJeGKFSruQtSlaX9TNV8783Y4rhLvbQK0e5EMR1IQGhvVdYHCtGyT",
-	"WkcwV4PagvQ7VBfUQj2eK/P6JWFvGNtZEbbGdds4hAXjbi5s/e5EbWVEVzf+xXVthZWvbL5ghhsZWi2q",
-	"rAVNx2eN1e80WsMgN9uODBtrOZujfiPIPey73yXJ/lPGJNuZUrUbu9lWbDiGbLe2dvQ/xT6Xo7TDba6G",
-	"r1s+7xspkHdgjnVIPCUjljA9P6jtSefc7H1xHGHBzTau+Wc8tv+FghI3WhVCN0e7JNLs1SPnW35BImVa",
-	"A0VjBglVyOR6ZfBzgKMFwe7dqfx1vMh3dxw/tKfY0Dssm1AjW6nF7Oc4wufn5+dBU3hV5ARNFEP4cXFG",
-	"UcVwXOihO+oLgQWUIhNY7Rgs3ar9sodYaO+mF3Ikr4Ekero88yrkquYuZqFJ21BqefPYOCCJ4kTEs19Q",
-	"rmCcJ2aHhzIy4UIBsnbv3g/VDO6RnaMyDmK9UO0OpApnDAvMl8GRp1R0DInjrZgwXjt9bwolI0rdC9lM",
-	"KsqHUdMbnK3Efa5ABkzm7CTaaL+kJBNVcwnxthhYL+nsJUhmVo2xFKnd6ncnSH9TiMSa3QGK3YFHfSXh",
-	"wq4e92TmD1emudaMT4atRx+XUoygNUHfIst6qmPFhGjg8bw1w/GLaQLhVWSbJGVBk/UTu2q0+rFdJZ6Q",
-	"hq+AUMa98wwI1v5HKLX6J8llo8WyYS+SV0uHahIItTUxQg/d/ysPuJu8qBY+xhLUtNUOpXvftnG3OGSz",
-	"eXBAkTSWAEJTxo2rYHAPMghjp8ILG9aExG2eb4bjouxquF26K4Golg2UJ4BmTW0lZyFJuu6vmdJCzr81",
-	"jG7IeHfB9PVcaUh/By1ZHDIdc04bb1xVkeXDDGQMfKGTyEdJrQfP05HzL5Sp2fLoYwkwNAeuqkGGcX12",
-	"EjyXskVwQXsWmiQbkcoV0A06hHxG5/ZcImKSDFnWRESbIyrVnkIaBBe5IywxLnMjJr+LWLKEaNOxGWAl",
-	"jOcPPSLTOp3GLn8cdO4TIUWuGXe/lic8BZINSZKIeCM+pVLfyGaeGfOo5zTrkGlGujXjq8ktZMc3xr9f",
-	"EhYIxElsJNe6YEQYHjImQQ1ZIC46t539YWXCxmCYQoyjan8uFC10r1EGeDPg5cFKhYIXQCTIlTv9DZYW",
-	"x2tQb3AXEtx7BQGZrVtH5dfOLkd+5Usq6xHvGgfgtcjWjhLMcxTEuWR6fm3GcjMfWQme53pa/fq14OPv",
-	"H25wVbjn31aM2XI9W6fI+Fgsg+Hq1fWNPbv25TCvRQoXQgKqSnoOPvFP/D/QeZKg2x7JWO/u8BYBp5lg",
-	"XCvk2UQEOU2jv3+4QTlPDMZSImdAkdBTkPdMwYEh9EcG0tZcKnQ/NblTwXJBKjWpVMKUVujWhi635SBm",
-	"ivaRLWu15D6QGfSK6iRfwYJuj/pHyAA900BvXUUuKQL+X1AmDDO/vbpBnqGef6V6Xxl9vEVjIe1YItex",
-	"qdf4xHGEExYDV1bbTusm+M8kA03k3OWO2kK+FOL55ZtahjbA/YPDg75pKTLgJGOmrOmgf3CM3TpntV3M",
-	"yFSt9hKTwJmnmXCRoyiEZ+rEXX6Hy+K/F4LOn6zEtZE7PjYB7Y+PG3XeR/3+k41dub5Aia0xBODaUHYV",
-	"vif9fhvBcoa9Whm67XK4ukujcth0Onq+utNivXPdpvHg4+cIqzxNDWAG+NWDCz9R4Rl6RcbrAGikYN0x",
-	"mSjrI40L+GwoLoJE5LoTJeb9bmCykNysBZSTZT/0VkwmxlPk26rnsS7YK7gTM+OS/DLiF7sxSVkyXy1Q",
-	"59EnEJDlb6AvXGW/XWV2aAOWfuiagRveYuYpZNWgt1I0XqDtYPN4uCnX8R8DcnvyTe/g3mMtI8yrZx/O",
-	"qcPJXAlN9LItEE7RBDQiiDfn3AWBYpVsNQ9z2nRRNIoa97k+hjmqmvTcBaXHaGVDfzHMtAzdZarvO21w",
-	"QSpMrNwpWA8dC/Xyj593iMR6JXvwPpLXw1M4CUcLTf1OSAWSEhJBoNhwqtOZuobLWHn6G3B7UEWHGraP",
-	"OvonqzuVl7uaavvNGnhcyrhbaZTybsuu6g/Vt65833QcXU5jeTtlzV2yZTW9fPnuGsWeue11dby6U3UR",
-	"cMFtNzO9Ytv282PDnRs9oNpkc59L1bRr9fj5MWpZoV09TE2Iu1mllwqr11qnD3cwftAq7Zz2mz7sHhzn",
-	"lCISQMcyOBbMvvTTFBLQsAyal/b5AmhWBfWuE92bxLZylhuK2PG0ppQ3jYD8BXMzYkZ0PF3Wg6ta2aPx",
-	"ugH3HWR3G+97X4b8AxvvPqDoxBCEIvopc2VMP69n+j015/HiFxg2w2twrTHV611O42kRU6uVD6DGvEW+",
-	"iPz/EwwMX1MpOFOABAeHBnfPAXFx3w0AmyqtiPp8m52nc7sM0GvFkKHgz7P4BJmSjc9oKbJS9P7JyrDM",
-	"ttuVV6/XQ+87HHOM/TVDMdNjjb3f8lsj25jxFUyY0iAR8fAJomfZdtcN3Spg/VOHbR2yjVp3KdqE19+D",
-	"eRRvvtv2QafENowXik8crY5wd+8Hv1Nk26rof0W1zajWwSwcya7yh71pVbLVbdSvyx3Nv3B00yxTC2Cr",
-	"fPUdvIibHKpucSlTbLArv9IGiMzU6W6R4TQ8VjBwsxXAu18h6oXGAQ3b19+e3myv5qucI4JuLi6RFfVi",
-	"6rHSYssPzOxCR9eeeJuajvZxElBMotiQR8QXqPy4/ns/ga9dxBBBik04UFQW89wxslC4b29Z/ESUT3lF",
-	"rkLLQtR2wFHHm/2u0dNgbaGkypYgKTtzf1u10HiEfF0RSWx9eXETwcylRIWrPWLKs22uJzTBbCqeviuQ",
-	"P9SnW4AY/cSFtswpkoL5GucnrxBkr/Ga6g7+Cf/8zw32a+DUlqw9E/zZ2/N324NZ2TLvXlzW6T2bQWe8",
-	"0/xI104PQ+sDhSq4ivs3Rbv617d+4OOVSzdL46bMNx5nMDd3wDKitKmf1QIR7lzU30y4k9uv8VVM1reD",
-	"nPKCCk2rwv02TTYr/HcZVzYGCn3usnj17RtnnlRRiGoq7ZHMuZW0eVChqk2OU3v5788uyb32TXYoMzdE",
-	"S4hmK6+ZQiRhd9BZtvOW3QE3rV3gWrHsuPQs21Wkk+Mr12KHDFfXtEJfYzXDG3ic9o/3M6L5+qx0o3ZV",
-	"RRUkfLT6EyWamC8DovKmWoRSNikqle1kgf4cVESnK3E+xN4fdRFGLhM8wD0bQXhaZUGxp/kYlU9I3vxN",
-	"y63q8lFcFfqUz7xh1DtSrkx+9H8DAA==",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

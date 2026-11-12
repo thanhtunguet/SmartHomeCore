@@ -8,6 +8,19 @@ info:
     * All `/api/v1` endpoints require a Bearer JWT unless marked otherwise.
     * Operations whose security requirement lists `admin` require the admin role.
     * Wake/shutdown return `202 Accepted` with a command; poll `GET /api/v1/commands/{id}` for the outcome.
+
+    Conventions:
+
+    * **Errors** always use the envelope `{"error":{"code","message"}}`, including `501 not_implemented`
+      for operations the Controller has not implemented yet.
+    * **Lists** are cursor-paginated (`limit`, `cursor`, `next_cursor`); there is no total count.
+      Order is fixed per endpoint: devices by `name` (case-insensitive, ascending), commands newest
+      first, status history newest first.
+    * **Clearing optional text fields** on `PATCH /devices/{id}`: send an empty string (`""`) for
+      `description`, `hostname`, `mac_address` or `wol_broadcast_address`. Omitted fields are unchanged.
+      `null` is not used. To remove the agent binding call `DELETE /devices/{id}/agent`.
+    * **Optional response fields** may be absent when the Controller cannot supply them (for example
+      metrics a platform does not expose); clients must treat absence as "unknown".
   license:
     name: Proprietary
 servers:
@@ -208,6 +221,23 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/v1/devices/{id}/agent:
+    parameters:
+      - $ref: "#/components/parameters/DeviceId"
+    delete:
+      tags: [devices]
+      operationId: removeDeviceAgent
+      summary: Remove the agent binding (remote shutdown no longer possible)
+      description: Idempotent for a device that exists but has no binding (`204`).
+      security:
+        - bearerAuth: [admin]
+      responses:
+        "204": { description: Binding removed (or none existed) }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /api/v1/devices/{id}/wake:
     parameters:
       - $ref: "#/components/parameters/DeviceId"
@@ -215,7 +245,15 @@ paths:
       tags: [devices, commands]
       operationId: wakeDevice
       summary: Send Wake-on-LAN (asynchronous)
-      description: Returns the created command, or the already active wake command for this device.
+      description: |
+        Returns the created command, or the already active wake command for this device (`202`
+        either way). The command is `pending`, then `sent` once the magic packet left; there is no
+        `acknowledged` step. It becomes `completed` when the monitor sees the device online before
+        `deadline_at` (default 180 s) and `timed_out` otherwise.
+
+        `409 Conflict` when a precondition is unmet; today that is a device without `mac_address`.
+        The `error.message` says which. (Behaviour for a device that is already `online` or has an
+        opposite command in progress is not yet decided; see the backlog.)
       security:
         - bearerAuth: [admin]
       responses:
@@ -236,6 +274,17 @@ paths:
       tags: [devices, commands]
       operationId: shutdownDevice
       summary: Request a signed shutdown via the device's agent (asynchronous)
+      description: |
+        Returns the created command, or the already active shutdown command for this device.
+        Lifecycle: `pending` → `sent` (request signed and delivered) → `acknowledged` (the agent
+        accepted it) → `completed` (the monitor saw the device go offline before `deadline_at`,
+        default 120 s). `failed` when dispatch fails or the agent rejects the command (see
+        `error_code` on `Command`); `timed_out` when the deadline passes first.
+
+        `409 Conflict` when a precondition is unmet; today that is a device without an agent
+        binding. The `error.message` says which. (Behaviour for a device that is already `offline`
+        or has an opposite command in progress is not yet decided; see the backlog.) Audited in
+        `audit_log`.
       security:
         - bearerAuth: [admin]
       responses:
@@ -336,6 +385,20 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SystemMetrics" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/system/info:
+    get:
+      tags: [system]
+      operationId: getSystemInfo
+      summary: Read-only Controller information and effective defaults
+      description: Never contains secrets, keys or file paths.
+      responses:
+        "200":
+          description: Controller information
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SystemInfo" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/system/controller-key:
@@ -595,6 +658,18 @@ components:
         port: { type: integer, minimum: 1, maximum: 65535, default: 9750 }
         scheme: { type: string, enum: [http, https], default: http }
 
+    DeviceType:
+      type: string
+      description: Kind of machine; used by clients for icons and labels only.
+      enum: [desktop, server, laptop, tv, nas, iot, router]
+      default: desktop
+
+    OperatingSystem:
+      type: string
+      description: Operating system family; informational only.
+      enum: [windows, linux, macos, android, freebsd, embedded]
+      default: linux
+
     Device:
       type: object
       required:
@@ -609,6 +684,8 @@ components:
         mac_address: { type: string, example: "aa:bb:cc:dd:ee:ff" }
         wol_broadcast_address: { type: string }
         wol_port: { type: integer }
+        device_type: { $ref: "#/components/schemas/DeviceType" }
+        os: { $ref: "#/components/schemas/OperatingSystem" }
         monitor_port: { type: integer }
         monitor_interval_seconds: { type: integer }
         monitor_timeout_ms: { type: integer }
@@ -618,6 +695,9 @@ components:
         agent: { $ref: "#/components/schemas/AgentBinding" }
         last_seen_at: { type: string, format: date-time }
         last_checked_at: { type: string, format: date-time }
+        last_latency_ms:
+          type: integer
+          description: Connect time of the most recent successful probe; absent until one succeeded.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -632,6 +712,8 @@ components:
         mac_address: { type: string }
         wol_broadcast_address: { type: string }
         wol_port: { type: integer, minimum: 1, maximum: 65535, default: 9 }
+        device_type: { $ref: "#/components/schemas/DeviceType" }
+        os: { $ref: "#/components/schemas/OperatingSystem" }
         monitor_port: { type: integer, minimum: 1, maximum: 65535 }
         monitor_interval_seconds: { type: integer, minimum: 5, maximum: 3600, default: 30 }
         monitor_timeout_ms: { type: integer, minimum: 100, maximum: 10000, default: 2000 }
@@ -640,7 +722,9 @@ components:
 
     DeviceUpdate:
       type: object
-      description: Partial update; omitted fields are unchanged.
+      description: |
+        Partial update; omitted fields are unchanged. Send `""` to clear `description`, `hostname`,
+        `mac_address` or `wol_broadcast_address`. Use `DELETE /devices/{id}/agent` to unbind the agent.
       properties:
         name: { type: string, minLength: 1, maxLength: 100 }
         description: { type: string, maxLength: 1000 }
@@ -649,6 +733,8 @@ components:
         mac_address: { type: string }
         wol_broadcast_address: { type: string }
         wol_port: { type: integer, minimum: 1, maximum: 65535 }
+        device_type: { $ref: "#/components/schemas/DeviceType" }
+        os: { $ref: "#/components/schemas/OperatingSystem" }
         monitor_port: { type: integer, minimum: 1, maximum: 65535 }
         monitor_interval_seconds: { type: integer, minimum: 5, maximum: 3600 }
         monitor_timeout_ms: { type: integer, minimum: 100, maximum: 10000 }
@@ -703,6 +789,17 @@ components:
 
     Command:
       type: object
+      description: |
+        Asynchronous wake or shutdown. Terminal statuses: `completed`, `failed`, `timed_out`.
+
+        | status | wake | shutdown |
+        |---|---|---|
+        | `pending` | created | created |
+        | `sent` | magic packet sent | signed request delivered to the agent's address |
+        | `acknowledged` | not used | agent answered `202`/`200` |
+        | `completed` | monitor saw the device online | monitor saw the device offline |
+        | `failed` | packet could not be sent | dispatch failed or the agent rejected it (`error_code`) |
+        | `timed_out` | `deadline_at` passed, device not seen online | `deadline_at` passed, device not seen offline |
       required: [id, device_id, type, status, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
@@ -710,8 +807,14 @@ components:
         type: { $ref: "#/components/schemas/CommandType" }
         status: { $ref: "#/components/schemas/CommandStatus" }
         requested_by: { type: string, format: uuid }
-        error_code: { type: string }
-        error: { type: string }
+        error_code:
+          type: string
+          description: |
+            Machine-readable failure reason, present when `status` is `failed`. Values returned by the
+            agent (`unauthorized`, `bad_request`, `wrong_agent`, `action_not_allowed`, `clock_skew`,
+            `stale`, `replay`, `busy`) are passed through; the Controller may add its own, so clients
+            must tolerate unknown values and fall back to `error`.
+        error: { type: string, description: Human-readable failure text. }
         deadline_at: { type: string, format: date-time }
         completed_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
@@ -751,12 +854,50 @@ components:
         local_ips:
           type: array
           items: { type: string }
+        cpu_cores: { type: integer }
+        load_average:
+          type: array
+          description: 1, 5 and 15 minute load averages; absent where the OS has none.
+          items: { type: number, format: double }
+          minItems: 3
+          maxItems: 3
+        kernel: { type: string, example: 5.15.0-1052-raspi }
+        restricted:
+          type: array
+          description: Metric names the platform does not expose (for example on Android), so clients can explain why they are missing.
+          items: { type: string, example: load_average }
         process:
           type: object
           properties:
+            pid: { type: integer }
+            uptime_seconds: { type: integer, format: int64 }
             rss_bytes: { type: integer, format: int64 }
             goroutines: { type: integer }
             heap_alloc_bytes: { type: integer, format: int64 }
+
+    SystemInfo:
+      type: object
+      required: [version, mode]
+      properties:
+        version: { type: string }
+        mode: { type: string, enum: [controller, agent, both] }
+        listen: { type: string, example: ":8080" }
+        tls: { type: boolean }
+        api_docs: { type: boolean }
+        access_token_ttl_seconds: { type: integer }
+        refresh_token_ttl_seconds: { type: integer }
+        retention_days: { type: integer }
+        monitor_defaults:
+          type: object
+          properties:
+            interval_seconds: { type: integer }
+            timeout_ms: { type: integer }
+            offline_threshold: { type: integer }
+        command_deadlines:
+          type: object
+          properties:
+            wake_seconds: { type: integer }
+            shutdown_seconds: { type: integer }
 
     ControllerKey:
       type: object
@@ -784,7 +925,10 @@ components:
         interval_seconds: { type: integer }
         enabled: { type: boolean }
         has_api_token: { type: boolean, description: The token itself is never returned. }
-        last_ip: { type: string }
+        last_ip: { type: string, description: Address the Controller last pushed to Cloudflare. }
+        detected_ip: { type: string, description: Public address found by the most recent discovery run. }
+        dns_value: { type: string, description: Content of the Cloudflare record as last read. }
+        last_checked_at: { type: string, format: date-time, description: Last discovery/comparison run, whether or not it changed the record. }
         last_synced_at: { type: string, format: date-time }
         last_error: { type: string }
         last_error_at: { type: string, format: date-time }

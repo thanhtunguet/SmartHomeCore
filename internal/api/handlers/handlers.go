@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/thanhtunguet/homecore/internal/api/gen"
+	"github.com/thanhtunguet/homecore/internal/config"
 	"github.com/thanhtunguet/homecore/internal/httpx"
 	"github.com/thanhtunguet/homecore/internal/storage"
 	"github.com/thanhtunguet/homecore/internal/version"
@@ -18,9 +19,10 @@ import (
 type Handlers struct {
 	gen.Unimplemented
 
-	DB  *storage.DB
-	Log *slog.Logger
-	Now func() time.Time
+	DB   *storage.DB
+	Log  *slog.Logger
+	Now  func() time.Time
+	Info InfoSource // what GET /system/info reports; set by the router
 }
 
 var _ gen.ServerInterface = (*Handlers)(nil)
@@ -65,3 +67,48 @@ func (h *Handlers) GetReadyz(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.WriteJSON(w, http.StatusServiceUnavailable, gen.Readiness{Status: gen.NotReady, Checks: checks})
 }
+
+// InfoSource is the configuration GET /system/info reports. It is a copy of non-secret settings.
+type InfoSource struct {
+	Mode       string
+	Controller config.Controller
+}
+
+// GetSystemInfo reports version, mode and effective defaults. Nothing secret or file-system
+// related (data dir, TLS paths, keys) is exposed.
+func (h *Handlers) GetSystemInfo(w http.ResponseWriter, _ *http.Request) {
+	c := h.Info.Controller
+	mode := h.Info.Mode
+	if mode == "" {
+		mode = string(config.ModeController)
+	}
+	info := gen.SystemInfo{
+		Version:                version.Version,
+		Mode:                   gen.SystemInfoMode(mode),
+		Listen:                 &c.Listen,
+		Tls:                    ptr(c.TLS.Enabled()),
+		ApiDocs:                &c.APIDocs,
+		AccessTokenTtlSeconds:  ptr(int(c.Auth.AccessTokenTTL.Seconds())),
+		RefreshTokenTtlSeconds: ptr(int(c.Auth.RefreshTokenTTL.Seconds())),
+		RetentionDays:          &c.RetentionDays,
+		MonitorDefaults: &struct {
+			IntervalSeconds  *int `json:"interval_seconds,omitempty"`
+			OfflineThreshold *int `json:"offline_threshold,omitempty"`
+			TimeoutMs        *int `json:"timeout_ms,omitempty"`
+		}{
+			IntervalSeconds:  ptr(int(c.Monitor.DefaultInterval.Seconds())),
+			OfflineThreshold: &c.Monitor.OfflineThreshold,
+			TimeoutMs:        ptr(int(c.Monitor.DefaultTimeout.Milliseconds())),
+		},
+		CommandDeadlines: &struct {
+			ShutdownSeconds *int `json:"shutdown_seconds,omitempty"`
+			WakeSeconds     *int `json:"wake_seconds,omitempty"`
+		}{
+			ShutdownSeconds: ptr(int(c.Commands.ShutdownDeadline.Seconds())),
+			WakeSeconds:     ptr(int(c.Commands.WakeDeadline.Seconds())),
+		},
+	}
+	httpx.WriteJSON(w, http.StatusOK, info)
+}
+
+func ptr[T any](v T) *T { return &v }

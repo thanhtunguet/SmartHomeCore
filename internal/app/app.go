@@ -67,6 +67,7 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 
 	srv, err := api.New(api.Deps{
 		Config:          cfg.Controller,
+		Mode:            cfg.Mode,
 		ShutdownTimeout: cfg.ShutdownTimeout,
 		Log:             log,
 		DB:              db,

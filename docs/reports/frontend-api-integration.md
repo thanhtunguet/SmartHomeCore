@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Date | 2026-11-12 |
+| Date | 2026-11-12 (first pass); resolution log in §9 (second pass, same day) |
 | Scope | `frontend/` (git submodule, HomeCoreUI) wired to the Controller REST API (`api/openapi.yaml` 0.1.0) |
 | Related | [web-ui requirements](../requirements/web-ui.md), [ADR-009/010](../design/decisions.md), [changelog](../changelogs/2026-11-12-frontend-api-integration.md) |
 | Status | UI side wired and smoke-tested against a spec-conformant mock. **Controller business endpoints still return 501**, so the end-to-end path against the real Controller is not yet possible. |
@@ -144,3 +144,27 @@ The mock and the Playwright script were kept out of the repository (see GAP-INF-
 | `DDNSConfig.*` | `DdnsConfig` (`zone_id`, `record_name`, `record_type`, `proxied`, `ttl`, `interval_seconds`, `enabled`, `has_api_token`, `last_ip`, `last_synced_at`, `last_error`, `last_error_at`) | `status` derived: updating / disabled / error / synced / never synced |
 | `ActivityEvent` | `Command` (+ session events) | `wake` → category `wol` |
 | `SystemMetrics` | `SystemMetrics` | Subset (GAP-API-07) |
+
+## 9. Resolution log (second pass, 2026-11-12)
+
+Additive changes that needed no product decision. Everything is optional or defaulted, so clients
+and mocks written against the first pass keep working. Details: [changelog](../changelogs/2026-11-12-api-gap-quick-wins.md).
+
+| ID | Result | How |
+|----|--------|-----|
+| GAP-BE-02 | Closed | `501` goes through the error envelope (`not_implemented`); `TestUnimplementedUsesErrorEnvelope` |
+| GAP-INF-04 | Closed | `immutable` for `assets/*`, `no-cache` for everything else; REQ-API-016 |
+| INC-UI-12 | Closed | Wake/shutdown buttons disabled while `power_transition` is not `none` (REQ-UI-017) |
+| INC-UI-13 | Closed | Wake/shutdown hidden from viewers in all five places (REQ-UI-008) |
+| GAP-API-01 | Closed in spec, DB and UI; handlers pending (Phase 2) | `device_type`, `os`; migration `0002`; legacy `localStorage` values pushed once by an admin session |
+| GAP-API-08 | Closed in spec, DB and UI; monitor pending (Phase 2) | `Device.last_latency_ms` |
+| GAP-API-04 | Closed in spec and UI; handlers pending | `""` clears text fields; `DELETE /devices/{id}/agent` (the UI no longer says the binding stays) |
+| GAP-API-06 | Closed | `GET /system/info` implemented, shown read-only in Settings |
+| GAP-API-07 | Spec and UI done; provider pending (Phase 4) | optional `cpu_cores`, `load_average`, `kernel`, `restricted`, `process.pid/uptime_seconds` |
+| GAP-API-03 | Spec and UI done; syncer pending (Phase 4) | optional `detected_ip`, `dns_value`, `last_checked_at`; "WAN IP changed" hint shown when both IPs exist |
+| GAP-API-10 | Partly closed | Command state table and the unavoidable `409` preconditions are in the spec. **Open:** already-online/offline and opposite-command cases |
+| GAP-API-11 | Closed | Agent error codes documented as pass-through values (deliberately not an `enum`, so new codes do not break clients) |
+| GAP-API-12 | Closed | Order stated in the spec; no `total` by design |
+| GAP-INF-01 | Specified, not implemented | Grace window added to the Phase 1b checklist |
+
+Still open and needing a decision or later phase: GAP-API-02, 05, 09, 13, 14, 15, 16 and GAP-INF-06..10.

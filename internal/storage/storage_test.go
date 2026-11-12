@@ -72,3 +72,29 @@ func TestActiveCommandUniqueness(t *testing.T) {
 		t.Fatalf("new command after completion must be allowed: %v", err)
 	}
 }
+
+func TestDeviceMetaColumnsDefaultAndConstrain(t *testing.T) {
+	ctx := context.Background()
+	db := openTemp(t)
+	if _, err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO devices (id, name, ip_address, monitor_port, created_at, updated_at)
+		VALUES ('d1', 'pc', '192.168.1.20', 22, 0, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	var typ, os string
+	var latency *int
+	if err := db.QueryRowContext(ctx, `SELECT device_type, os, last_latency_ms FROM devices WHERE id='d1'`).Scan(&typ, &os, &latency); err != nil {
+		t.Fatal(err)
+	}
+	if typ != "desktop" || os != "linux" || latency != nil {
+		t.Fatalf("defaults: type=%q os=%q latency=%v", typ, os, latency)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE devices SET device_type='toaster' WHERE id='d1'`); err == nil {
+		t.Fatal("invalid device_type accepted")
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE devices SET os='beos' WHERE id='d1'`); err == nil {
+		t.Fatal("invalid os accepted")
+	}
+}
