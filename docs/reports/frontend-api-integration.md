@@ -21,6 +21,11 @@ listed in §4 (API/spec gaps), §5 (inconsistencies found in the original UI, mo
 Severity: **High** = blocks a user-visible flow or breaks a stated requirement · **Medium** = feature
 degraded or workaround in place · **Low** = cosmetic or future-proofing.
 
+Status markers on the IDs (state after the second pass, 2026-11-12; details in [§9](#9-resolution-log-second-pass-2026-11-12)):
+**✅** closed · **◐** partly done: the spec, DB and UI work is in (or, for GAP-INF-01, the requirement is written) but the
+Controller handler or provider is still pending (the phase is named in §9) · no marker = still open. The *Finding*/*What the UI does now*
+text of a marked row describes the first pass; §9 has the current behaviour.
+
 ## 2. What was wired
 
 | Area | Before | Now |
@@ -43,7 +48,7 @@ Code map: `frontend/src/api/` (client, endpoints, mappers, wire types), `context
 | ID | Sev | Finding | Evidence | Needed |
 |----|-----|---------|----------|--------|
 | GAP-BE-01 | High | No operation except health/docs is implemented | `curl -X POST /api/v1/auth/login` → `501`; `GET /api/v1/devices` → `401` with any token | Roadmap Phase 1b (JWT), Phase 2 (devices, commands), Phase 3 (controller key, shutdown), Phase 4 (DDNS, metrics) |
-| GAP-BE-02 | High | `501` responses have an **empty body**, not the error envelope that REQ-API-001 promises for every error | `curl -i` shows `HTTP/1.1 501` with `Content-Length: 0` (no `Content-Type`) | Make `gen.Unimplemented` answer through `httpx.WriteError(…, "not_implemented", …)`. The UI already copes (it falls back to the status text) |
+| GAP-BE-02 ✅ | High | `501` responses have an **empty body**, not the error envelope that REQ-API-001 promises for every error | `curl -i` shows `HTTP/1.1 501` with `Content-Length: 0` (no `Content-Type`) | Make `gen.Unimplemented` answer through `httpx.WriteError(…, "not_implemented", …)`. The UI already copes (it falls back to the status text) |
 | GAP-BE-03 | High | Login cannot succeed, so the UI stops at the login screen with the message "Sign-in is not implemented on this Controller yet" | Real-Controller smoke test (§7) | Phase 1b |
 
 Until these land, the full flow was exercised only against a mock (§7). **Re-run the UI smoke test
@@ -54,18 +59,18 @@ the Controller's behaviour.
 
 | ID | Sev | Gap | What the UI does now | Suggested change |
 |----|-----|-----|----------------------|------------------|
-| GAP-API-01 | Medium | `Device` has no **type** (desktop/NAS/TV…) or **OS**; the UI uses both for icons and labels | Stored per browser in `localStorage` keyed by device id (`api/deviceMeta.ts`): not shared between browsers/users, lost when browser data is cleared, defaults to desktop/linux | Add optional `device_type` and `os` (or a free-form `tags`/`metadata`) to `Device`, `DeviceCreate`, `DeviceUpdate`; add a migration |
+| GAP-API-01 ◐ | Medium | `Device` has no **type** (desktop/NAS/TV…) or **OS**; the UI uses both for icons and labels | Stored per browser in `localStorage` keyed by device id (`api/deviceMeta.ts`): not shared between browsers/users, lost when browser data is cleared, defaults to desktop/linux | Add optional `device_type` and `os` (or a free-form `tags`/`metadata`) to `Device`, `DeviceCreate`, `DeviceUpdate`; add a migration |
 | GAP-API-02 | Medium | No way to **list Cloudflare zones/records** | Zone ID and record name are typed by hand; the old "pick zone, pick record" dropdowns are gone | `GET /ddns/zones` and `GET /ddns/zones/{id}/records` (token supplied once, or from an existing config), or accept zone *name* and resolve it server-side |
-| GAP-API-03 | Medium | No **detected public IP** and no **current DNS value**; `DdnsConfig` only has `last_ip` | Dashboard "Public IPv4" shows the last IP pushed; the "WAN IP changed, sync needed" comparison cannot be shown | Add `detected_ip`, `dns_value`, `last_checked_at` to `DdnsConfig` (or `GET /system/public-ip`) |
-| GAP-API-04 | Medium | `PATCH /devices/{id}` cannot **unset** anything: no way to remove an agent binding, clear the MAC, broadcast or description | Disabling "remote shutdown" in the form keeps the old binding (the form says so); clearing fields sends `""`, which the server may reject | Define merge-patch semantics with `null` (e.g. `"agent": null`), or add `DELETE /devices/{id}/agent` |
+| GAP-API-03 ◐ | Medium | No **detected public IP** and no **current DNS value**; `DdnsConfig` only has `last_ip` | Dashboard "Public IPv4" shows the last IP pushed; the "WAN IP changed, sync needed" comparison cannot be shown | Add `detected_ip`, `dns_value`, `last_checked_at` to `DdnsConfig` (or `GET /system/public-ip`) |
+| GAP-API-04 ◐ | Medium | `PATCH /devices/{id}` cannot **unset** anything: no way to remove an agent binding, clear the MAC, broadcast or description | Disabling "remote shutdown" in the form keeps the old binding (the form says so); clearing fields sends `""`, which the server may reject | Define merge-patch semantics with `null` (e.g. `"agent": null`), or add `DELETE /devices/{id}/agent` |
 | GAP-API-05 | Medium | No **activity/audit endpoint** although the `audit_log` table exists (REQ-API-008 gap) | Activity = command history + events of this browser session; probes, device edits, DDNS actions and other users' actions are lost on reload | `GET /api/v1/activity` (cursor, filters by device/category), fed by `audit_log` and status history |
-| GAP-API-06 | Low | No **settings/info endpoint**: server name, listen address, monitoring defaults, session lifetime, retention live in YAML | UI Settings shows only what `/healthz` and `/system/metrics` give; defaults for new devices are browser-local | Read-only `GET /system/info` (version, mode, listen, defaults); decide whether any setting should become writable |
-| GAP-API-07 | Low | `SystemMetrics` is a subset of what the System screen was designed for: no CPU core count, kernel, per-interface MAC/Rx/Tx, PID, process uptime, load average, "restricted metrics" list for Android | Those tiles were removed; platform string is split into OS/arch | Extend `SystemMetrics` (Phase 4, `gopsutil`) or drop the tiles from the design |
-| GAP-API-08 | Low | `Device` has no **last latency** or **consecutive failures** | Latency is shown only after a manual probe in the current session | Add `last_latency_ms` (and optionally `consecutive_failures`) to `Device` |
+| GAP-API-06 ✅ | Low | No **settings/info endpoint**: server name, listen address, monitoring defaults, session lifetime, retention live in YAML | UI Settings shows only what `/healthz` and `/system/metrics` give; defaults for new devices are browser-local | Read-only `GET /system/info` (version, mode, listen, defaults); decide whether any setting should become writable |
+| GAP-API-07 ◐ | Low | `SystemMetrics` is a subset of what the System screen was designed for: no CPU core count, kernel, per-interface MAC/Rx/Tx, PID, process uptime, load average, "restricted metrics" list for Android | Those tiles were removed; platform string is split into OS/arch | Extend `SystemMetrics` (Phase 4, `gopsutil`) or drop the tiles from the design |
+| GAP-API-08 ◐ | Low | `Device` has no **last latency** or **consecutive failures** | Latency is shown only after a manual probe in the current session | Add `last_latency_ms` (and optionally `consecutive_failures`) to `Device` |
 | GAP-API-09 | Medium | No **agent health/version**; the UI used to show "Agent ready/unreachable" and a version | "Agent status" is inferred: bound + device online = ready, bound + offline = unreachable. It is a guess, labelled "Bound (host online)" | Add `agent.status`, `agent.version`, `agent.last_ok_at` to `AgentBinding` once the dispatcher exists |
-| GAP-API-10 | Medium | **Command semantics are not in the spec**: what `completed` means per type, when `acknowledged` occurs, default deadlines, and what `409` on wake/shutdown means (already active vs. no MAC vs. no agent vs. already online?) | UI relies on [architecture §8.2](../design/architecture.md#82-command-lifecycle) and prints the server's `message` for any error | Copy the §8.2 state table into the `Command` schema description; enumerate `409` causes per operation |
-| GAP-API-11 | Medium | **Error codes are not enumerated** (`error_code` on commands: `clock_skew`, `agent_rejected`, …) | Raw `error`/`error_code` text is displayed | Document the code list (agent-protocol §errors) in the spec as an enum or table |
-| GAP-API-12 | Low | **List ordering and totals are unspecified**: no `total`, no documented sort for devices/commands/history | UI assumes devices in server order and sorts activity by timestamp itself | State the order in the spec (e.g. devices by name, commands newest first); consider `total` |
+| GAP-API-10 ◐ | Medium | **Command semantics are not in the spec**: what `completed` means per type, when `acknowledged` occurs, default deadlines, and what `409` on wake/shutdown means (already active vs. no MAC vs. no agent vs. already online?) | UI relies on [architecture §8.2](../design/architecture.md#82-command-lifecycle) and prints the server's `message` for any error | Copy the §8.2 state table into the `Command` schema description; enumerate `409` causes per operation |
+| GAP-API-11 ✅ | Medium | **Error codes are not enumerated** (`error_code` on commands: `clock_skew`, `agent_rejected`, …) | Raw `error`/`error_code` text is displayed | Document the code list (agent-protocol §errors) in the spec as an enum or table |
+| GAP-API-12 ✅ | Low | **List ordering and totals are unspecified**: no `total`, no documented sort for devices/commands/history | UI assumes devices in server order and sorts activity by timestamp itself | State the order in the spec (e.g. devices by name, commands newest first); consider `total` |
 | GAP-API-13 | Low | `allow_viewer_wake` appears in [architecture §9](../design/architecture.md#9-rest-api) ("viewers can wake") but `wakeDevice` in the spec is admin-only | UI follows the spec: viewers cannot wake | Pick one; update the spec or the architecture table and the config key |
 | GAP-API-14 | Low | No **user/password management** (change password, list users) | Old Settings fields for username and "session timeout" were removed | Backlog; needed before exposing beyond a home LAN |
 | GAP-API-15 | Low | `Device.hostname` exists in the API but not in the UI form | Not editable from the UI | Add a field to the form when hostname-based probing is implemented |
@@ -88,17 +93,17 @@ Fixed in this change unless stated otherwise.
 | INC-UI-09 | Medium | **Google Fonts** links are blocked by the Controller's CSP (`default-src 'self'`); Vite also inlines small fonts as `data:` URIs, which the same CSP blocks (found by running the built UI under the real CSP) | Fonts bundled with `@fontsource/*`; `build.assetsInlineLimit: 0` |
 | INC-UI-10 | Medium | `package.json` could not be installed (`esbuild ^0.25` vs Vite 8 peer range) and carried unused AI Studio leftovers: `@google/genai`, `express`, `dotenv`, `tsx`, `@types/express`, `autoprefixer`, `metadata.json` (Gemini capability), `.env.example` with `GEMINI_API_KEY`, `DISABLE_HMR` config, dev server on `0.0.0.0`, package name `react-example` | Removed; package renamed `homecore-ui`; dev server binds localhost; `package-lock.json` added |
 | INC-UI-11 | Low | Viewport meta disabled zoom (`maximum-scale=1`, `user-scalable=no`), an accessibility problem | Removed |
-| INC-UI-12 | Low | Wake/shutdown buttons stay enabled while `power_transition` is `waking`/`shutting_down` | **Not fixed**: the field is mapped (`Device.powerTransition`) but not yet used to disable buttons |
-| INC-UI-13 | Low | A viewer sees admin actions (wake, shutdown) in several places | Add/Edit/Delete/Sync are hidden; wake/shutdown stay visible but refuse with a message (server enforces `403` anyway). Hiding them everywhere is a follow-up |
+| INC-UI-12 ✅ | Low | Wake/shutdown buttons stay enabled while `power_transition` is `waking`/`shutting_down` | Fixed in the second pass: buttons are disabled while `power_transition` is not `none` (§9) |
+| INC-UI-13 ✅ | Low | A viewer sees admin actions (wake, shutdown) in several places | Fixed in the second pass: add/edit/delete/sync and wake/shutdown are hidden from viewers everywhere; the server still enforces `403` (§9) |
 
 ## 6. Infrastructure and process
 
 | ID | Sev | Finding | Notes / recommendation |
 |----|-----|---------|------------------------|
-| GAP-INF-01 | Medium | **Refresh-token rotation vs. multiple tabs.** Rotation with reuse detection revokes the whole family if two tabs refresh with the same token. The UI shares one session in `localStorage` and serialises refresh with the Web Locks API, but `navigator.locks` exists only in **secure contexts**, and the Controller is normally reached over plain `http://192.168.x.x` | On plain HTTP the lock is unavailable (the code falls back to the shared-storage check, which narrows but does not close the race). Give the Controller a short reuse **grace window** (e.g. 10 s) when it implements refresh rotation (Phase 1b) |
+| GAP-INF-01 ◐ | Medium | **Refresh-token rotation vs. multiple tabs.** Rotation with reuse detection revokes the whole family if two tabs refresh with the same token. The UI shares one session in `localStorage` and serialises refresh with the Web Locks API, but `navigator.locks` exists only in **secure contexts**, and the Controller is normally reached over plain `http://192.168.x.x` | On plain HTTP the lock is unavailable (the code falls back to the shared-storage check, which narrows but does not close the race). Give the Controller a short reuse **grace window** (e.g. 10 s) when it implements refresh rotation (Phase 1b) |
 | GAP-INF-02 | Medium | Tokens are in `localStorage` (XSS-readable). The API has no cookie flow | Accepted for a LAN appliance, mitigated by the strict CSP; recorded as [ADR-010](../design/decisions.md). Revisit if the Controller is exposed to the Internet |
 | GAP-INF-03 | Low | Same secure-context limit affects the **clipboard API**: "Copy" buttons for the controller key do nothing over plain HTTP | The key is rendered as selectable text; consider enabling TLS on the Controller (`controller.tls`) for the UI |
-| GAP-INF-04 | Low | Static handler sends no `Cache-Control`/`ETag` (embedded files have a zero mod-time, so no `Last-Modified` either) | Add `immutable` for `/assets/*` (hashed names) and `no-cache` for `index.html` |
+| GAP-INF-04 ✅ | Low | Static handler sends no `Cache-Control`/`ETag` (embedded files have a zero mod-time, so no `Last-Modified` either) | Add `immutable` for `/assets/*` (hashed names) and `no-cache` for `index.html` |
 | GAP-INF-05 | Low | Polling cost per open tab: devices 10 s, commands 15 s, metrics 10 s, DDNS 30 s, health 60 s (paused in hidden tabs). The device list is refetched in full each time | Fine for <10 users; add `ETag`/`If-None-Match` or `updated_since` if it matters (no WebSocket/SSE by scope) |
 | GAP-INF-06 | Medium | Wire types in `frontend/src/api/schema.ts` are **hand-written**. `openapi-typescript` needs TypeScript 5 as a peer, the UI uses TypeScript 7; nothing detects spec drift | Backlog: generate from `api/openapi.yaml` in CI (`make check-generated` style) or pin TypeScript |
 | GAP-INF-07 | Medium | The frontend has **no automated tests**; the smoke test used here (headless Chromium against a mock) is not in the repository | Backlog: keep a contract mock or, better, run the UI e2e against the real Controller in CI once Phase 1b/2 land |
@@ -147,6 +152,7 @@ The mock and the Playwright script were kept out of the repository (see GAP-INF-
 
 ## 9. Resolution log (second pass, 2026-11-12)
 
+Commits: Controller repo `3394d34`, `frontend/` submodule `586531a` (local, not pushed).
 Additive changes that needed no product decision. Everything is optional or defaulted, so clients
 and mocks written against the first pass keep working. Details: [changelog](../changelogs/2026-11-12-api-gap-quick-wins.md).
 
@@ -166,5 +172,8 @@ and mocks written against the first pass keep working. Details: [changelog](../c
 | GAP-API-11 | Closed | Agent error codes documented as pass-through values (deliberately not an `enum`, so new codes do not break clients) |
 | GAP-API-12 | Closed | Order stated in the spec; no `total` by design |
 | GAP-INF-01 | Specified, not implemented | Grace window added to the Phase 1b checklist |
+
+Next steps for whoever picks this up: when the Phase 2/3/4 handlers land, re-run the UI against the real
+Controller for every ◐ item, then flip it to ✅ here and in the roadmap.
 
 Still open and needing a decision or later phase: GAP-API-02, 05, 09, 13, 14, 15, 16 and GAP-INF-06..10.
