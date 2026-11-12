@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1 |
-| Last reviewed | 2026-11-11 |
+| Last reviewed | 2026-11-12 |
 | Requirements | [requirements/overview.md](../requirements/overview.md) |
 | Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs) |
 | API contract | [api/openapi.yaml](../../api/openapi.yaml) (source of truth) |
@@ -147,7 +147,8 @@ internal/
     migrations/          versioned *.sql files
   scheduler/             tiny interval runner with jitter
   platform/              OS adapters: power control, metrics (build-tagged)
-web/                     embedded static UI + offline Swagger UI assets
+web/                     embedded UI (static/ = build of the frontend submodule, placeholder/ = fallback) + offline Swagger UI assets
+frontend/                git submodule (HomeCoreUI source; built by `make ui-build`, see ADR-009)
 configs/                 example configuration
 deploy/                  systemd units, polkit rules
 docs/                    requirements, design, plans, changelogs (see docs/README.md)

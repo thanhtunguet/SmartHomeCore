@@ -5,6 +5,7 @@ that spans days uses its end date). Newest entries are listed first below.
 
 | Date | Entry | Summary |
 |------|-------|---------|
+| 2026-11-12 | [2026-11-12-frontend-api-integration.md](2026-11-12-frontend-api-integration.md) | Frontend submodule wired to the REST API, embedded build, `REQ-UI`, gap report |
 | 2026-11-11 | [2026-11-11-project-bootstrap.md](2026-11-11-project-bootstrap.md) | Brief analysis, design, project skeleton (Phase 1 foundation, agent protocol), documentation structure |
 
 ## Template

@@ -56,9 +56,10 @@ describe the code as it now is.
 
 | Folder | Holds | Main files |
 |--------|-------|------------|
-| `docs/requirements/` | What the system must do; requirement IDs, status, verifying tests | `overview.md` (brief traceability), `runtime-and-configuration.md`, `http-api.md`, `storage-and-secrets.md`, `shutdown-agent.md` |
+| `docs/requirements/` | What the system must do; requirement IDs, status, verifying tests | `overview.md` (brief traceability), `runtime-and-configuration.md`, `http-api.md`, `storage-and-secrets.md`, `shutdown-agent.md`, `web-ui.md` |
 | `docs/design/` | How it is built | `architecture.md`, `database.md`, `agent-protocol.md`, `decisions.md` (ADRs) |
 | `docs/plans/` | What's next | `roadmap.md` (phase checklists + backlog) |
+| `docs/reports/` | Point-in-time findings: gap and inconsistency analyses with stable IDs | `frontend-api-integration.md` |
 | `docs/changelogs/` | What changed, per session | `YYYY-MM-DD-slug.md`, index in `README.md` |
 
 `BRIEF.md` is the original input. Do not edit it; its points are tracked in

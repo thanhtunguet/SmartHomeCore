@@ -16,3 +16,7 @@ master.key
 .DS_Store
 .idea/
 .vscode/
+
+# Built frontend (make ui-build) is embedded from web/static; only .gitkeep is tracked
+/web/static/*
+!/web/static/.gitkeep

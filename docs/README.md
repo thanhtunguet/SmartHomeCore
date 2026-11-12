@@ -8,6 +8,7 @@ docs/
 ├── requirements/   WHAT the system must do (with status and verifying tests)
 ├── design/         HOW it is built (architecture, database, protocols, decisions)
 ├── plans/          WHEN / what's next (roadmap, backlog)
+├── reports/        Findings and gap analyses (point-in-time, not requirements)
 └── changelogs/     WHAT changed, session by session
 ```
 
@@ -20,6 +21,7 @@ docs/
 | [http-api.md](requirements/http-api.md) | `REQ-API`: REST foundation, docs, health, authN/authZ, middleware |
 | [storage-and-secrets.md](requirements/storage-and-secrets.md) | `REQ-ST`, `REQ-SEC`: SQLite, migrations, master key, sealing |
 | [shutdown-agent.md](requirements/shutdown-agent.md) | `REQ-AG`: signed commands, replay protection, least-privilege execution |
+| [web-ui.md](requirements/web-ui.md) | `REQ-UI`: frontend submodule, embedded build, session, flows against the REST API |
 
 ## design/
 
@@ -38,6 +40,12 @@ running Controller serves it at `/api/docs`.
 | Document | Content |
 |----------|---------|
 | [roadmap.md](plans/roadmap.md) | Phase checklists, next steps, backlog of known gaps |
+
+## reports/
+
+| Document | Content |
+|----------|---------|
+| [frontend-api-integration.md](reports/frontend-api-integration.md) | Frontend ↔ API wiring: what was connected, gaps (`GAP-*`) and inconsistencies (`INC-*`), verification |
 
 ## changelogs/
 

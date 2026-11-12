@@ -5,6 +5,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 LDFLAGS := -s -w -X $(PKG)/internal/version.Version=$(VERSION) -X $(PKG)/internal/version.Commit=$(COMMIT)
 DEV_CONFIG ?= configs/dev.yaml
+UI_DIR  := frontend
 CROSS_TARGETS := linux/amd64 linux/arm64 linux/arm windows/amd64 darwin/arm64 darwin/amd64 android/arm64
 
 .DEFAULT_GOAL := help
@@ -16,6 +17,27 @@ help: ## Show this help
 .PHONY: build
 build: ## Build the homecore binary into build/
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o build/$(BINARY) ./cmd/homecore
+
+.PHONY: ui-install
+ui-install: ## Install frontend dependencies (needs: git submodule update --init)
+	@test -f $(UI_DIR)/package.json || (echo "frontend submodule missing: git submodule update --init"; exit 1)
+	cd $(UI_DIR) && npm ci --no-audit --no-fund
+
+.PHONY: ui-build
+ui-build: ui-install ## Build the frontend into web/static (embedded by `make build`)
+	cd $(UI_DIR) && npm run build -- --outDir ../web/static --emptyOutDir
+	@touch web/static/.gitkeep
+
+.PHONY: ui-lint
+ui-lint: ## Type-check the frontend
+	cd $(UI_DIR) && npm run lint
+
+.PHONY: ui-dev
+ui-dev: ## Frontend dev server on :3000, proxying /api to the Controller on :8080 (run `make run` too)
+	cd $(UI_DIR) && npm run dev
+
+.PHONY: build-full
+build-full: ui-build build ## Build the UI, then the homecore binary with the UI embedded
 
 .PHONY: devtools
 devtools: ## Build developer utilities (keygen, signed agent commands)

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | Brief §7 (phases), §8 (MVP); [architecture](../design/architecture.md) |
-| Last updated | 2026-11-11 |
+| Last updated | 2026-11-12 |
 
 Legend: `[x]` done and verified · `[~]` partially done · `[ ]` not started.
 Tick items in the same change that completes them, and add a changelog entry.
@@ -52,6 +52,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [x] SQLite + versioned migrations + full initial schema (REQ-ST-*)
 - [x] Master key + AES-GCM sealing (REQ-SEC-001/002)
 - [x] Static frontend serving with SPA fallback (REQ-API-005)
+- [x] Frontend submodule wired to the REST contract: login, devices, wake, shutdown, DDNS, activity, system; embedded build with placeholder fallback (REQ-UI-001..015, ADR-009/010). Verified against a mock only; re-run against the real Controller per phase
 
 ## Phase 1b — Authentication
 
@@ -126,3 +127,14 @@ Tick items in the same change that completes them, and add a changelog entry.
 | Signed agent announce for automatic IP updates | ADR-002 |
 | Tests for CLI flag precedence | REQ-RT-003 gap |
 | Test `/readyz` 503 path and `WithTx` rollback | REQ-API-004, REQ-ST-004 |
+| Re-run the UI against the real Controller as Phases 1b/2/3/4 land (UI is verified only against a mock) | GAP-BE-01..03 |
+| `501` responses use the error envelope | GAP-BE-02 |
+| Device `type`/`os`, `last_latency_ms`, agent health in the API | GAP-API-01, 08, 09 |
+| Cloudflare zone/record listing and public-IP fields for the DDNS screen | GAP-API-02, 03 |
+| `PATCH` semantics to clear fields / remove the agent binding | GAP-API-04 |
+| Activity/audit endpoint and `GET /system/info` | GAP-API-05, 06 |
+| Refresh-token reuse grace window (multi-tab on plain HTTP) | GAP-INF-01 |
+| Cache-Control for static assets | GAP-INF-04 |
+| Generate UI wire types from `api/openapi.yaml`; frontend tests in CI | GAP-INF-06, 07, REQ-UI-016 |
+| Hide wake/shutdown from viewers; disable while `power_transition` is active | INC-UI-12, 13 |
+| Release pipeline must run `make ui-build` before `make cross` | GAP-INF-10 |

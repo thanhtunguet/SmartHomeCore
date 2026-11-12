@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | [`BRIEF.md`](../../BRIEF.md) (Technical Brief v0.1, Vietnamese) |
-| Last reviewed | 2026-11-11 |
+| Last reviewed | 2026-11-12 |
 | Owner | Project maintainers |
 
 This document turns the brief into the project's requirements baseline. It records which brief
@@ -59,7 +59,7 @@ One build supports both roles; configuration selects `controller`, `agent` or `b
 | JWT authentication | **Partial.** Role policy enforced; token issuing/verification pending | [http-api.md](http-api.md) |
 | Cloudflare DDNS | **Planned** | Phase 4 |
 | Swagger UI at `/api/docs` | **Implemented** | [http-api.md](http-api.md) |
-| Static file serving | **Implemented** (placeholder UI) | [http-api.md](http-api.md) |
+| Static file serving | **Implemented** (UI embedded via `make build-full`; placeholder otherwise) | [http-api.md](http-api.md), [web-ui.md](web-ui.md) |
 
 ### 4.2 Non-goals
 
@@ -78,6 +78,7 @@ has a stable ID, a status and the test that verifies it.
 | [http-api.md](http-api.md) | `REQ-API` | §3.1, §4, §6 (API zone) |
 | [storage-and-secrets.md](storage-and-secrets.md) | `REQ-ST`, `REQ-SEC` | §3.7, §6 (secrets) |
 | [shutdown-agent.md](shutdown-agent.md) | `REQ-AG` | §3.5, §6 (agent zone) |
+| [web-ui.md](web-ui.md) | `REQ-UI` | §3.1 (static frontend), UI for §3.3–3.6 |
 
 Status vocabulary used everywhere:
 
@@ -120,7 +121,7 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 | 3.1.2 | JWT authentication and authorization | Partial (authorization done, JWT pending) | REQ-API-007, REQ-API-008 |
 | 3.1.3 | Swagger UI at `/api/docs` | Implemented | REQ-API-003 |
 | 3.1.4 | OpenAPI spec at `/api/openapi.json` | Implemented | REQ-API-002 |
-| 3.1.5 | Static frontend serving | Implemented | REQ-API-005 |
+| 3.1.5 | Static frontend serving | Implemented (UI wired to the API; backend endpoints pending) | REQ-API-005, REQ-UI-001..004 |
 | 3.1.6 | Health/readiness endpoints | Implemented | REQ-API-004 |
 | 3.1.7 | Request logging, timeout, graceful shutdown | Implemented | REQ-API-010, REQ-RT-005 |
 | 3.1.8 | CORS, rate limiting, request body limit | Implemented (untested) | REQ-API-011..013 |

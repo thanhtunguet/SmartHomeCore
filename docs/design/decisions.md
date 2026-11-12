@@ -114,3 +114,51 @@ repository) are added per package only when justified.
 **Decision.** Pinned `swagger-ui-dist` assets are committed under `web/swagger/` (fetched once by
 `scripts/fetch-swagger-ui.sh`) and embedded with `//go:embed`. The page loads `/api/openapi.json`
 from the same origin. No CDN at runtime.
+
+---
+
+## ADR-009 — Frontend as a git submodule, embedded into the binary
+
+**Context.** The web UI (HomeCoreUI: React 19, Vite 8, Tailwind 4) lives in its own repository. The
+Controller must serve it without a separate web server (brief §3.1, MVP "static file serving"), and
+`go build` must keep working with `CGO_ENABLED=0` for all seven targets without Node.
+
+**Decision.**
+- The UI is the git submodule `frontend/`. `make ui-build` builds it into `web/static/`, which
+  `//go:embed all:static` ships in the binary. `web/static/*` is git-ignored except `.gitkeep`, so
+  the embed directive is valid on a fresh checkout.
+- If `web/static/index.html` is absent, `web.Static()` serves `web/placeholder/index.html` instead.
+- `make build` / `make cross` do not need Node. `make build-full` builds the UI first; release
+  builds must use it.
+- The UI calls same-origin relative URLs only. In development, Vite proxies `/api`, `/healthz` and
+  `/readyz` to a local Controller, so CORS stays off.
+- The UI conforms to the Controller's CSP: bundled fonts, no inline scripts, no `data:` assets.
+- Wire types in the UI are hand-written from `api/openapi.yaml` (the generator needs TypeScript 5,
+  the UI uses 7). This is a known drift risk (GAP-INF-06).
+
+**Consequences.** Frontend and backend release independently but are pinned together by the
+submodule pointer. UI changes must be committed in the submodule first, then the pointer updated.
+The submodule URL is SSH; CI needs a key or an HTTPS URL.
+
+---
+
+## ADR-010 — UI session tokens in localStorage and polling instead of push
+
+**Context.** The API returns JWT access and rotating refresh tokens in JSON bodies (no cookie flow).
+The scope guardrails exclude WebSocket/SSE.
+
+**Decision.**
+- The UI keeps the session (access token, refresh token, expiry, user) in `localStorage`, shared
+  across tabs. A refresh happens before expiry and once on `401`, serialised with the Web Locks API
+  where the browser offers it (secure contexts only).
+- Live data is polled (devices 10 s, commands 15 s, metrics 10 s, DDNS 30 s, health 60 s), paused in
+  hidden tabs.
+- Long operations (wake, shutdown) are followed by polling `GET /commands/{id}`; the API answers
+  `202` and never blocks.
+
+**Consequences.** Tokens are readable by any script running on the origin, so the strict CSP is
+the main mitigation; acceptable for a home LAN, to be revisited before exposing the Controller to
+the Internet (httpOnly cookie flow). Without a secure context (plain `http://` on the LAN) the
+multi-tab refresh race is only narrowed, so the Controller should tolerate a short reuse grace window
+when it implements refresh rotation (GAP-INF-01). Polling cost grows with open tabs; fine at the
+target scale (< 10 users).
