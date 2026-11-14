@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | Author | agent |
-| Scope | `api/openapi.yaml`, `internal/servicekey` (new), `internal/auth`, `internal/api` (server, handlers, middleware), `internal/app`, migration `0007`, docs |
-| Requirements | REQ-AUTH-021..027, REQ-API-029..031, REQ-SEC-006; ADR-018 |
+| Scope | `api/openapi.yaml`, `internal/servicekey` (new), `internal/auth`, `internal/api` (server, handlers, middleware), `internal/app`, migration `0007`, `frontend/` (submodule), docs |
+| Requirements | REQ-AUTH-021..027, REQ-API-029..031, REQ-SEC-006, REQ-UI-023/024; ADR-018 |
 
 ## Added
 - **`internal/servicekey`**: the Controller generates an Ed25519 key pair per key and stores the private
@@ -25,6 +25,12 @@
 - `auth.Router` (dispatch by JWT `alg`), `auth.TokenAlgorithm`, `Principal.KeyID`.
 - Audit: `service_key.create|revoke|rotate` in the same transaction as the change; device audit rows made
   with a key carry `service_key_id`.
+- **Web UI** (`frontend/`, submodule): a **Service Account Keys** card in Settings (REQ-UI-023/024): key list with
+  scope, expiry, last use and state; create form (name, scope with descriptions, lifetime in days with presets,
+  default 1 year); one-time key panel with Copy and `curl` examples (use, rotate); revoke with confirmation. No
+  Rotate button, because a key rotates itself. New files `src/api/serviceKeys.ts` (+ test),
+  `src/components/settings/ServiceKeysSection.tsx` (+ static-render test); `endpoints.ts`, `schema.ts` and the
+  contract test cover the three operations; `src/api/generated/schema.d.ts` regenerated (`npm run gen:api`).
 - ADR-018; requirements, database, architecture (§10.2), roadmap updated.
 
 ## Changed
@@ -45,8 +51,8 @@
 
 ## Notes
 - The MCP server is not in this repository; `mcp` is the scope it authenticates against.
-- The frontend submodule was not touched: no UI for keys, and its generated types are stale
-  (`make ui-check-api` will say so until `npm run gen:api` is run there).
+- The frontend is a git submodule: its changes sit in the working tree of `frontend/` and need their own commit in
+  HomeCoreUI, then a pointer bump here. Until then `git status` here shows `m frontend`.
 - GitNexus impact before editing: `Authorize` and `PolicyFromSpec` **HIGH** (1 direct caller `newRouter`,
   3 flows, authentication of every protected operation); `Principal` LOW; `Requirement` UNKNOWN (no
   resolvable callers; confirmed by text search: only `authz.go` and its test). The change to them is a
@@ -64,11 +70,17 @@
 | `make generate` | succeeded; `internal/api/gen/api.gen.go` regenerated |
 | smoke test, real binary (temp data dir) | `homecore user add`, Controller started: create an `mcp` key → `201`; `GET /devices` with it → `200`; `GET /ddns` → `403`; rotate → `200` with `previous_key_valid_until` 60 s ahead; the new key `GET /devices` → `200`; a retry with the old key returned the identical new key; revoke the new key → `204`, then `401`; the key and its signature are absent from the Controller log |
 
+| frontend `npm run lint`, `npm test` (192 tests), `npm run check:api`, `npm run build` | pass |
+| browser run, headless Google Chrome (playwright-core, outside the repo) against a real Controller built from this tree and the Vite dev server | create (90 days) → one-time JWT panel, Copy puts the exact key on the clipboard → the key `GET /devices` `200`, `GET /ddns` `403` → dismiss, key gone from the DOM → reload, listed as Active → revoke → Revoked, button gone → Controller `401`. No page errors besides the missing `favicon.ico`. Screenshots viewed (dark theme) |
+
 **Not run**: a real MCP client or legacy app using a key; a clock-based wait through the real 1-minute
-grace (the unit tests use a fake clock); `make ui-check` (frontend not touched); golangci-lint.
+grace (the unit tests use a fake clock); the UI in light theme, on a narrow/mobile viewport, and in Firefox/Safari;
+golangci-lint. The first browser attempts failed because of the test script (it clicked the Controller-key Copy
+button above the keys card, and a selector matched the description text), not the app; the script was fixed, not
+the UI.
 
 ## Known gaps / follow-ups
-- UI screen, a `homecore` subcommand for creating keys, the MCP server itself (roadmap, "Service account keys").
+- A `homecore` subcommand for creating keys without the API, the MCP server itself (roadmap, "Service account keys").
 - Bearer keys: no proof of possession, no per-device or per-IP restriction; a stolen old key can fetch the
   new key during the grace window.
 - No cap on keys per user; no user-facing rotate-by-id.

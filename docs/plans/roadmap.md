@@ -127,7 +127,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [x] `x-token-scopes` in the spec and `Requirement.Scopes` in `middleware.Authorize`; scopes `legacy` and `mcp` (REQ-API-029, REQ-AUTH-023)
 - [x] `POST/GET /service-account-keys`, `DELETE /service-account-keys/{id}`, `POST /auth/service-key/rotate` with grace window and idempotent retry (REQ-API-030, REQ-AUTH-024..026)
 - [x] Audit and retention (REQ-AUTH-027)
-- [ ] UI screen for keys (frontend submodule; regenerate its types with `npm run gen:api`)
+- [x] UI card for keys in Settings: list, create (name, scope, TTL), one-time key panel, revoke (REQ-UI-023/024; frontend submodule, commit it in HomeCoreUI and bump the pointer)
 - [ ] `homecore` subcommand to create a key without the API (bootstrap on a headless box)
 - [ ] The MCP server that consumes `mcp` keys (a separate project)
 - [ ] Review the `mcp` allowlist with a real agent (is `shutdownDevice` something an agent should hold?)

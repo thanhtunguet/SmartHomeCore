@@ -6,7 +6,7 @@
 | Code | `frontend/` (git submodule, HomeCoreUI: React 19, Vite 8, Tailwind 4), `web/embed.go`, `web/placeholder/`, `Makefile` (`ui-*`, `build-full`) |
 | Design | [architecture §6.1, §10](../design/architecture.md), [ADR-009](../design/decisions.md#adr-009--frontend-as-a-git-submodule-embedded-into-the-binary), [ADR-010](../design/decisions.md#adr-010--ui-session-tokens-in-localstorage-and-polling-instead-of-push) |
 | Report | [frontend-api-integration.md](../reports/frontend-api-integration.md) (gaps and inconsistencies, IDs `GAP-*`, `INC-*`) |
-| Last updated | 2026-11-14 (legacy endpoint paths and separate Origin field in the device sheet; responsive Activity header; network interface and disk display updates; fourth pass: Activity wired to `GET /activity`; third pass: no roles, 1 s device guard, DDNS dropdowns, generated types, unit tests) |
+| Last updated | 2026-11-14 (service account keys screen; legacy endpoint paths and separate Origin field in the device sheet; responsive Activity header; network interface and disk display updates; fourth pass: Activity wired to `GET /activity`; third pass: no roles, 1 s device guard, DDNS dropdowns, generated types, unit tests) |
 | Status | UI wired to the REST contract and smoke-tested against a spec mock (first pass; second and third pass covered by type-check, build and unit tests only, not run in a browser); **not yet end-to-end against the real Controller** (business endpoints return `501`) |
 
 "Smoke test" below means the headless-Chromium run against a throwaway mock of `api/openapi.yaml`,
@@ -58,6 +58,16 @@ plus the real Controller for health, `501` and `401`. Neither is in the reposito
 
 | REQ-UI-022 | Activity header keeps action labels on one line; the action group moves below the title when the available width is insufficient, and its buttons may wrap individually on very narrow screens. | Implemented (untested) | Frontend type-check and production build; responsive browser layout not yet verified |
 
+| REQ-UI-023 | **Service Account Keys** card in Settings (`ServiceKeysSection`; ADR-018, REQ-AUTH-021..026): lists the user's keys (name, scope, expiry, last use, state Active/Rotated/Expired/Revoked, an expired-while-open key shows as Expired), creates a key from a name (1..64 characters, trimmed), a scope (`mcp` preselected, or `legacy`, each with a description of what it can call) and a lifetime in whole days (default 365, presets 30 d, 90 d, 1 y, 5 y, at most 20 y; invalid input is refused before the request), and revokes a key after a confirmation. There is no Rotate button: a key rotates itself (the card says so and shows the `curl` call). | Implemented | `serviceKeys.test.ts` (ttl, name, state, relative time, examples), `endpoints.test.ts` and `endpoints.contract.test.ts` (method, path, body, error envelope, spec facts), `ServiceKeysSection.test.ts` (static render); browser run 2026-11-14 (below) |
+| REQ-UI-024 | The key returned by creating a service account key is shown **once**, in a warning panel with a Copy button and `curl` examples (use the key, rotate it) built from the page origin. It is held only in the component's state: dismissing the panel ("I have saved the key") removes it from the DOM, and it is never written to `localStorage`, a toast, a log or the list (which holds metadata only). | Implemented | Browser run 2026-11-14: after dismissing, the key was nowhere in the page content and the list showed metadata only; Copy put the exact key on the clipboard |
+
+Browser run for REQ-UI-023/024 (2026-11-14, real Controller built from this tree, Vite dev server, headless
+Google Chrome driven by playwright-core): empty list → empty name refused client-side → create an `mcp` key with
+90 days → the one-time panel with a JWT, Copy gives the key → that key `GET /devices` `200` and `GET /ddns` `403`
+→ dismiss → key absent from the DOM → reload, the key is listed as Active → Revoke (confirm) → Revoked, the button
+is gone → the Controller answers `401` for it. No page errors; the only console error was the missing
+`favicon.ico` (the app has no icon; unrelated). The script is not part of the repository.
+
 ## Known gaps
 
 All tracked, with IDs and suggested fixes, in
@@ -65,4 +75,5 @@ All tracked, with IDs and suggested fixes, in
 
 - The Controller implements none of the business endpoints (GAP-BE-01..03); real end-to-end is untested.
 - Agent health (REQ-API-021) and the Cloudflare lookups (REQ-API-020) are specified but not implemented server-side, so the UI shows the inferred agent state, and DDNS records cannot be created until Phase 4 (the dropdowns have no data). 
+- The Service Account Keys flow (REQ-UI-023/024) was verified by a browser run that is not part of the repository; there is no DOM test environment (Node only), so the one-time key panel has no automated test.
 - Most React components, hooks and flows are not covered by automated tests; the System disk label has a static-render test (REQ-UI-016, REQ-UI-020).

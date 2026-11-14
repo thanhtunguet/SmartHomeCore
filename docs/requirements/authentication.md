@@ -81,7 +81,7 @@ that user.
 
 - The HS256 legacy tokens of `homecore token create` still cannot be revoked on their own (disabling the account still needs SQL, no `user disable` command); service account keys (above) are the individually revocable replacement. Rotating the JWT signing key revokes every token and session.
 - A service account key is a bearer secret with no proof of possession, no per-device and no per-IP restriction (ADR-018). For `RotationGrace` after a rotation a stolen old key can fetch the new key.
-- No UI and no CLI for keys yet: create them with the API (frontend submodule and a `homecore` subcommand are not built). No cap on the number of keys per user, no "rotate by id" for a user (create a new key and revoke the old one).
+- Keys are managed in the Settings screen of the web UI (REQ-UI-023/024) or with the API; there is no `homecore` subcommand for them yet. No cap on the number of keys per user, no "rotate by id" for a user (create a new key and revoke the old one).
 - The MCP server that consumes `mcp` keys is not part of this repository.
 
 - No `user disable|enable|delete` command: `users.disabled` is honoured everywhere (REQ-AUTH-006/007/008) but can only be set with SQL for now. Tracked in the roadmap backlog.

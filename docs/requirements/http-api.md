@@ -133,4 +133,4 @@ failed sync is a normal `200` `DdnsSyncResult` with `result: failed`.
 
 `make generate` rewrote `internal/api/gen/api.gen.go`. The frontend's generated types
 (`frontend/src/api/generated`) were **not** regenerated here (submodule untouched); `make ui-check-api`
-will report them stale until the owner runs `npm run gen:api`.
+will report them stale until the owner runs `npm run gen:api`. (Superseded the same day: the UI work for REQ-UI-023 regenerated them; `npm run check:api` is clean.)
