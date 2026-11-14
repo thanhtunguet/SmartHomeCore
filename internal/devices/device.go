@@ -1,8 +1,9 @@
-// Package devices is the device registry: model, validation and persistence (devices and
-// agent_bindings tables). Identity is the UUID; IP/hostname/MAC are mutable attributes (ADR-002).
+// Package devices is the device registry: model, validation and persistence (devices,
+// agent_bindings and device_status_history tables). Identity is the UUID; IP/hostname/MAC are
+// mutable attributes (ADR-002).
 //
-// TODO(phase-2): Repository interface + SQLite implementation (repo_sqlite.go), Service with
-// validation (MAC via wol.NormalizeMAC, ports, name uniqueness → 409), and API handlers.
+// Files: device.go (model), validate.go (input rules), service.go (use cases), repo.go
+// (Repository interface and errors), repo_sqlite.go (SQLite implementation).
 package devices
 
 import "time"
@@ -25,6 +26,39 @@ const (
 	TransitionShuttingDown PowerTransition = "shutting_down"
 )
 
+// Type is the informational kind of a machine (icons and labels in clients).
+type Type string
+
+// OS is the informational operating system family.
+type OS string
+
+// Enumerations of the API (api/openapi.yaml DeviceType, OperatingSystem).
+const (
+	TypeDesktop Type = "desktop"
+	TypeServer  Type = "server"
+	TypeLaptop  Type = "laptop"
+	TypeTV      Type = "tv"
+	TypeNAS     Type = "nas"
+	TypeIoT     Type = "iot"
+	TypeRouter  Type = "router"
+
+	OSWindows  OS = "windows"
+	OSLinux    OS = "linux"
+	OSMacOS    OS = "macos"
+	OSAndroid  OS = "android"
+	OSFreeBSD  OS = "freebsd"
+	OSEmbedded OS = "embedded"
+)
+
+// Defaults applied on creation (match the spec and the column defaults).
+const (
+	DefaultWOLPort         = 9
+	DefaultMonitorInterval = 30 * time.Second
+	DefaultMonitorTimeout  = 2000 * time.Millisecond
+	DefaultAgentPort       = 9750
+	DefaultAgentScheme     = "http"
+)
+
 // Device is a managed machine.
 type Device struct {
 	ID                  string
@@ -35,6 +69,8 @@ type Device struct {
 	MACAddress          string
 	WOLBroadcastAddress string
 	WOLPort             int
+	Type                Type
+	OS                  OS
 	MonitorPort         int
 	MonitorInterval     time.Duration
 	MonitorTimeout      time.Duration
@@ -42,6 +78,7 @@ type Device struct {
 	Status              Status
 	LastSeenAt          *time.Time
 	LastCheckedAt       *time.Time
+	LastLatencyMs       *int // connect time of the last successful probe
 	Agent               *AgentBinding
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
@@ -55,9 +92,39 @@ func (d Device) ProbeHost() string {
 	return d.IPAddress
 }
 
-// AgentBinding links a device to the HomeCore Agent running on it.
+// AgentBinding links a device to the HomeCore Agent running on it. Holds no secret.
 type AgentBinding struct {
 	AgentID string
 	Port    int
 	Scheme  string // http | https
+}
+
+// StatusChange is one row of the status history: a transition, not every probe.
+type StatusChange struct {
+	ID             int64
+	Status         Status
+	PreviousStatus Status // empty when unknown to the writer
+	Reason         string
+	ChangedAt      time.Time
+}
+
+// Observation is the result of one probe as the monitor records it.
+type Observation struct {
+	DeviceID  string
+	At        time.Time
+	Reachable bool
+	Latency   time.Duration // meaningful only when Reachable
+	Status    Status        // status after applying hysteresis
+	Previous  Status        // status before this observation
+	Changed   bool          // Status != Previous: append a history row
+	Reason    string        // history reason, e.g. "probe" or "manual probe"
+}
+
+// MonitorTarget is a device the monitor should consider, with a hint about urgency.
+type MonitorTarget struct {
+	Device Device
+	// Urgent is true while the device has an active (non-terminal) command: the monitor then
+	// checks it every tick instead of every monitor_interval, so a wake or shutdown completes
+	// quickly. It is also the reason a disabled device is still probed.
+	Urgent bool
 }

@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| Date | 2026-11-12 (first pass); resolution logs in §9 (second pass, same day), §10 (third pass, 2026-11-14, after the owner's decisions) and §11 (Phase 1b, authentication) |
+| Date | 2026-11-12 (first pass); resolution logs in §9 (second pass, same day), §10 (third pass, 2026-11-14, after the owner's decisions), §11 (Phase 1b, authentication) and §12 (Phase 2, devices and commands) |
 | Scope | `frontend/` (git submodule, HomeCoreUI) wired to the Controller REST API (`api/openapi.yaml` 0.1.0) |
 | Related | [web-ui requirements](../requirements/web-ui.md), [ADR-009/010](../design/decisions.md), [changelog](../changelogs/2026-11-12-frontend-api-integration.md) |
-| Status | UI side wired and smoke-tested against a spec-conformant mock. **Controller business endpoints still return 501**, so the end-to-end path against the real Controller is not yet possible. |
+| Status | UI side wired and smoke-tested against a spec-conformant mock. Since Phase 2 the Controller implements auth, devices, probe, history, wake and commands (checked with `curl`, §12); **shutdown, metrics, controller key and DDNS still return 501**, and the UI itself has not been run in a browser against the real Controller. |
 
 ## 1. Summary
 
@@ -59,14 +59,14 @@ the Controller's behaviour.
 
 | ID | Sev | Gap | What the UI does now | Suggested change |
 |----|-----|-----|----------------------|------------------|
-| GAP-API-01 ◐ | Medium | `Device` has no **type** (desktop/NAS/TV…) or **OS**; the UI uses both for icons and labels | Stored per browser in `localStorage` keyed by device id (`api/deviceMeta.ts`): not shared between browsers/users, lost when browser data is cleared, defaults to desktop/linux | Add optional `device_type` and `os` (or a free-form `tags`/`metadata`) to `Device`, `DeviceCreate`, `DeviceUpdate`; add a migration |
+| GAP-API-01 ✅ | Medium | `Device` has no **type** (desktop/NAS/TV…) or **OS**; the UI uses both for icons and labels | Stored per browser in `localStorage` keyed by device id (`api/deviceMeta.ts`): not shared between browsers/users, lost when browser data is cleared, defaults to desktop/linux | Add optional `device_type` and `os` (or a free-form `tags`/`metadata`) to `Device`, `DeviceCreate`, `DeviceUpdate`; add a migration |
 | GAP-API-02 ◐ | Medium | No way to **list Cloudflare zones/records** | Zone ID and record name are typed by hand; the old "pick zone, pick record" dropdowns are gone | `GET /ddns/zones` and `GET /ddns/zones/{id}/records` (token supplied once, or from an existing config), or accept zone *name* and resolve it server-side |
 | GAP-API-03 ◐ | Medium | No **detected public IP** and no **current DNS value**; `DdnsConfig` only has `last_ip` | Dashboard "Public IPv4" shows the last IP pushed; the "WAN IP changed, sync needed" comparison cannot be shown | Add `detected_ip`, `dns_value`, `last_checked_at` to `DdnsConfig` (or `GET /system/public-ip`) |
-| GAP-API-04 ◐ | Medium | `PATCH /devices/{id}` cannot **unset** anything: no way to remove an agent binding, clear the MAC, broadcast or description | Disabling "remote shutdown" in the form keeps the old binding (the form says so); clearing fields sends `""`, which the server may reject | Define merge-patch semantics with `null` (e.g. `"agent": null`), or add `DELETE /devices/{id}/agent` |
+| GAP-API-04 ✅ | Medium | `PATCH /devices/{id}` cannot **unset** anything: no way to remove an agent binding, clear the MAC, broadcast or description | Disabling "remote shutdown" in the form keeps the old binding (the form says so); clearing fields sends `""`, which the server may reject | Define merge-patch semantics with `null` (e.g. `"agent": null`), or add `DELETE /devices/{id}/agent` |
 | GAP-API-05 | Medium | No **activity/audit endpoint** although the `audit_log` table exists (REQ-API-008 gap) | Activity = command history + events of this browser session; probes, device edits, DDNS actions and other users' actions are lost on reload | `GET /api/v1/activity` (cursor, filters by device/category), fed by `audit_log` and status history |
 | GAP-API-06 ✅ | Low | No **settings/info endpoint**: server name, listen address, monitoring defaults, session lifetime, retention live in YAML | UI Settings shows only what `/healthz` and `/system/metrics` give; defaults for new devices are browser-local | Read-only `GET /system/info` (version, mode, listen, defaults); decide whether any setting should become writable |
 | GAP-API-07 ◐ | Low | `SystemMetrics` is a subset of what the System screen was designed for: no CPU core count, kernel, per-interface MAC/Rx/Tx, PID, process uptime, load average, "restricted metrics" list for Android | Those tiles were removed; platform string is split into OS/arch | Extend `SystemMetrics` (Phase 4, `gopsutil`) or drop the tiles from the design |
-| GAP-API-08 ◐ | Low | `Device` has no **last latency** or **consecutive failures** | Latency is shown only after a manual probe in the current session | Add `last_latency_ms` (and optionally `consecutive_failures`) to `Device` |
+| GAP-API-08 ✅ | Low | `Device` has no **last latency** or **consecutive failures** | Latency is shown only after a manual probe in the current session | Add `last_latency_ms` (and optionally `consecutive_failures`) to `Device` |
 | GAP-API-09 ◐ | Medium | No **agent health/version**; the UI used to show "Agent ready/unreachable" and a version | "Agent status" is inferred: bound + device online = ready, bound + offline = unreachable. It is a guess, labelled "Bound (host online)" | Add `agent.status`, `agent.version`, `agent.last_ok_at` to `AgentBinding` once the dispatcher exists |
 | GAP-API-10 ✅ | Medium | **Command semantics are not in the spec**: what `completed` means per type, when `acknowledged` occurs, default deadlines, and what `409` on wake/shutdown means (already active vs. no MAC vs. no agent vs. already online?) | UI relies on [architecture §8.2](../design/architecture.md#82-command-lifecycle) and prints the server's `message` for any error | Copy the §8.2 state table into the `Command` schema description; enumerate `409` causes per operation |
 | GAP-API-11 ✅ | Medium | **Error codes are not enumerated** (`error_code` on commands: `clock_skew`, `agent_rejected`, …) | Raw `error`/`error_code` text is displayed | Document the code list (agent-protocol §errors) in the spec as an enum or table |
@@ -139,13 +139,13 @@ The mock and the Playwright script were kept out of the repository (see GAP-INF-
 | `monitoring.port` / `protocolPreset` | `monitor_port` / derived | Preset derived from the port (22 SSH, 3389 RDP, 80 HTTP, 443 HTTPS, else custom) |
 | `monitoring.intervalSeconds` / `timeoutMs` | `monitor_interval_seconds` / `monitor_timeout_ms` | 5–3600 s, 100–10000 ms |
 | `monitoring.lastCheckedAt` | `last_checked_at` | |
-| `monitoring.lastLatencyMs` | `ProbeResult.latency_ms` | Session only (GAP-API-08) |
+| `monitoring.lastLatencyMs` | `ProbeResult.latency_ms`, `Device.last_latency_ms` | Stored and returned (GAP-API-08, §12) |
 | `Device.lastSeen` (text) | `last_seen_at` | Formatted client-side |
 | `Device.status` / `powerTransition` | `status` / `power_transition` | |
 | `shutdown.enabled` | derived: `agent` present | |
 | `shutdown.agentId` / `agentPort` / `agentScheme` | `agent.agent_id` / `port` / `scheme` | Host = device IP |
 | `shutdown.agentStatus` | derived | Inferred (GAP-API-09) |
-| `Device.type` / `os` | none | Browser-local (GAP-API-01) |
+| `Device.type` / `os` | `device_type`, `os` | Stored and returned (GAP-API-01, §12) |
 | `DDNSConfig.*` | `DdnsConfig` (`zone_id`, `record_name`, `record_type`, `proxied`, `ttl`, `interval_seconds`, `enabled`, `has_api_token`, `last_ip`, `last_synced_at`, `last_error`, `last_error_at`) | `status` derived: updating / disabled / error / synced / never synced |
 | `ActivityEvent` | `Command` (+ session events) | `wake` → category `wol` |
 | `SystemMetrics` | `SystemMetrics` | Subset (GAP-API-07) |
@@ -223,3 +223,30 @@ Behaviour the UI should know (no UI change needed, none made; `frontend/` untouc
 - The access token stays valid after logout until `exp` (at most 15 min).
 - All failed refreshes (unknown, expired, revoked, reused) are the same `401`; the UI should treat any `401` from `/auth/refresh` as "session ended".
 
+## 12. Resolution log: Phase 2, devices and commands (2026-11-14)
+
+Verified against the **real Controller** (built binary, temp data dir, loopback port, `curl`; a
+local TCP listener played the device). The UI was **not** run in a browser; the HTTP contract it
+depends on was checked, including a `POST /devices` body built exactly as `toDeviceCreate` builds
+it (all optional fields present, agent binding included): `201`, and the response has every field
+`toDevice` reads with the expected types and names (`device_type`, `os`, lower-case `mac_address`
+that the UI upper-cases, `wol_port`, `power_transition`, `agent.{agent_id,port,scheme}`). Details:
+[changelog](../changelogs/2026-11-14-phase-2-devices.md), [devices-and-commands.md](../requirements/devices-and-commands.md).
+
+| ID | Status | What the real Controller did |
+|----|--------|------------------------------|
+| GAP-API-01 ✅ | Closed at the API level | `device_type` (`nas`) and `os` are stored by `POST`/`PATCH` and returned by get and list; defaults `desktop`/`linux`; an unknown value is `400`. The one-time push of legacy `localStorage` values is UI behaviour and was not exercised |
+| GAP-API-04 ✅ | Closed at the API level | `PATCH {"description":"","wol_broadcast_address":""}` removed both from the response; `PATCH {"mac_address":""}` removed the MAC and the next wake was `409` ("the device has no mac_address; set one to enable Wake-on-LAN"); `DELETE /devices/{id}/agent` returned `204` three times in a row (bound, unbound, and again) and `404` for an unknown device; `agent` was gone from the next `GET` |
+| GAP-API-08 ✅ | Closed at the API level | `last_latency_ms` appeared after the first successful probe (`0` for a loopback connect, so the UI must treat `0` as present, not as "absent") and stayed through later failures; `last_seen_at` and `last_checked_at` were maintained by the monitor without any manual probe |
+| GAP-API-10 ✅ for wake | Wake verified; shutdown half pending Phase 3 | Wake of an offline device: `202`, command `sent`, `deadline_at` 12 s ahead (test config); a second wake in the same second: `429` with `Retry-After: 1`; a wake after the window: the **same** command id; the listener started: the command became `completed` within one tick and the device `online`; a wake of the now online device: a new command already `completed` with no packet; without a MAC: `409`; no listener: `timed_out` about 1 s after `deadline_at`; after `kill -9` and a restart the active command was still `sent` and then `timed_out`. Shutdown still answers `501`, so its `409` (no agent binding) and agent cases cannot be checked until Phase 3 |
+| GAP-BE-01 | Partly closed | Devices, probe, history, wake and commands are real; shutdown, metrics, controller key and DDNS are still `501` |
+
+Observations for the UI (no UI change made; `frontend/` untouched):
+
+- A `PATCH` that omits `agent` leaves the binding alone; only `DELETE .../agent` removes it (as `needsAgentRemoval` assumes).
+- A manual probe of an online device that fails once answers `reachable: false` with `status: online` (hysteresis); the UI should show the returned `status`, not `reachable`.
+- `next_cursor` is absent on the last page; a `limit` of `0` or above 200 is `400`.
+- `agent.status`, `version` and `last_ok_at` are absent until Phase 3, so the UI keeps showing its inferred state (labelled as such).
+- The generated TypeScript types in `frontend/src/api/generated` are stale by the spec edits (`400` on `listDevices`, `getDeviceHistory`, `listCommands`; `409` on `updateDevice`; two DDNS description quotes). They are response-code additions only, so nothing breaks, but `make ui-check` (`check:api`) will report drift until someone regenerates them in the submodule.
+- Timestamps have millisecond precision (`...:22.865Z`).
+- The error envelope code for `409` is `conflict`; for the throttle `rate_limited`.

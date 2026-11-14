@@ -6,7 +6,7 @@
 | Schema version | `4` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`, `0003_users_no_roles.sql`, `0004_refresh_grace.sql`) |
 | Owner role | Controller only. The Agent has no database |
 | Requirements | [storage-and-secrets.md](../requirements/storage-and-secrets.md) |
-| Last reviewed | 2026-11-14 |
+| Last reviewed | 2026-11-14 (Phase 2: lifecycle, cursors, audit actions) |
 
 The DDL in `internal/storage/migrations/` is authoritative. This document explains it and must be
 updated in the same change as any new migration.
@@ -130,10 +130,10 @@ The device registry. Identity is `id`; addresses are mutable attributes (ADR-002
 | `enabled` | INTEGER | no | `1` | bool; disabled devices are not probed |
 | `device_type` | TEXT | no | `'desktop'` | `desktop` \| `server` \| `laptop` \| `tv` \| `nas` \| `iot` \| `router`; informational (0002) |
 | `os` | TEXT | no | `'linux'` | `windows` \| `linux` \| `macos` \| `android` \| `freebsd` \| `embedded`; informational (0002) |
-| `status` | TEXT | no | `'unknown'` | `unknown` \| `online` \| `offline` (observed only) |
+| `status` | TEXT | no | `'unknown'` | `unknown` \| `online` \| `offline` (observed only; written by `RecordObservation`, never by the device API) |
 | `last_seen_at` | INTEGER | yes | | last successful probe |
 | `last_checked_at` | INTEGER | yes | | last probe of any result |
-| `last_latency_ms` | INTEGER | yes | | connect time of the last successful probe (0002); written by the monitor |
+| `last_latency_ms` | INTEGER | yes | | connect time of the last successful probe (0002); written by the monitor, kept across failures |
 | `created_at`, `updated_at` | INTEGER | no | | |
 
 `power_transition` (`none`/`waking`/`shutting_down`) is **not stored**. It is derived from the
@@ -146,7 +146,7 @@ Optional 1:1 link from a device to the HomeCore Agent running on it. Holds no se
 | Column | Type | Null | Default | Constraint / note |
 |--------|------|------|---------|-------------------|
 | `device_id` | TEXT | no | | PK, FK → `devices(id)` `ON DELETE CASCADE` |
-| `agent_id` | TEXT | no | | `UNIQUE`; the Agent's self-generated UUID |
+| `agent_id` | TEXT | no | | `UNIQUE` (binding the same agent to a second device → `409`); the Agent's self-generated UUID |
 | `port` | INTEGER | no | `9750` | 1–65535 |
 | `scheme` | TEXT | no | `'http'` | `http` \| `https` |
 | `agent_public_key` | BLOB | yes | | reserved for signed acknowledgements (protocol v2) |
@@ -177,10 +177,10 @@ Status **transitions** only (not every probe), to keep the DB small.
 | `device_id` | TEXT | no | FK → `devices(id)` `ON DELETE CASCADE` |
 | `status` | TEXT | no | new status enum |
 | `previous_status` | TEXT | yes | previous status enum |
-| `reason` | TEXT | no | e.g. `probe`, `wake command completed`; default `''` |
+| `reason` | TEXT | no | `probe` (scheduled tick) or `manual probe` (`POST .../probe`); default `''` |
 | `changed_at` | INTEGER | no | |
 
-Index: `device_status_history_device (device_id, changed_at DESC)`.
+Index: `device_status_history_device (device_id, changed_at DESC)`. Listing is newest first, keyset-paged on `(changed_at, id)`.
 
 ### commands
 
@@ -205,11 +205,11 @@ Indexes:
 - `commands_created (created_at DESC)`: global history listing.
 - `commands_one_active`: **unique** on `(device_id, type) WHERE status IN ('pending','sent','acknowledged')`.
   The database itself guarantees at most one in-flight command per device and type (ADR-003). The
-  service maps the constraint violation to "return the active command".
+  engine maps the constraint violation to "return the active command" (`commands.ErrActiveExists`), so concurrent requests converge on one row. Listing is newest first, keyset-paged on `(created_at, id)`; `commands_created` serves the unfiltered list and `commands_device` the `device_id` filter.
 
 ### audit_log
 
-Append-only record of security-relevant actions (login, shutdown, key rotation, config changes). Written by `internal/audit`. Actions today: `auth.login` (`result` `ok`/`failed`; failure reason in `details`), `auth.logout`, `auth.refresh_reuse` (`revoked`), `user.create`, `user.password_change` (`actor` `cli`). A failed login stores `actor`/`actor_user_id` only when the submitted username is an existing account.
+Append-only record of security-relevant actions (login, shutdown, key rotation, config changes). Written by `internal/audit`. Actions today: `auth.login` (`result` `ok`/`failed`; failure reason in `details`), `auth.logout`, `auth.refresh_reuse` (`revoked`), `user.create`, `user.password_change` (`actor` `cli`), and the device actions `device.create`, `device.update` (`details.fields` lists the changed fields), `device.delete`, `device.agent_remove` (`target_type` `device`, `target_id` the device id; `details.name` for create/update/delete) and `device.wake` (`details.command_id`, `status`). Only successful requests are written; rejected ones (400/404/409/429) are not. `device.shutdown` arrives with Phase 3. A failed login stores `actor`/`actor_user_id` only when the submitted username is an existing account.
 
 | Column | Type | Null | Default | Note |
 |--------|------|------|---------|------|
@@ -285,15 +285,30 @@ Created by the migration runner (not by a migration file).
 
 ## 5. Data lifecycle
 
-| Data | Growth | Retention (planned) |
-|------|--------|---------------------|
-| `device_status_history` | per transition | pruned after `controller.retention_days` (default 30) |
-| `commands` (terminal) | per wake/shutdown | pruned after `retention_days` |
-| `ddns_sync_history` | per sync attempt | pruned after `retention_days` |
+| Data | Growth | Retention |
+|------|--------|-----------|
+| `device_status_history` | per transition | pruned after `controller.retention_days` (default 30) by `internal/retention` |
+| `commands` (terminal) | per wake/shutdown | terminal rows (`completed`, `failed`, `timed_out`) pruned after `retention_days`, by `updated_at`; active commands are never pruned |
+| `ddns_sync_history` | per sync attempt | pruned after `retention_days` (`ddns.PruneSyncHistory`) |
 | `refresh_tokens` | per login/refresh | implemented by `auth.Service.Maintain` (every minute): expired or revoked > 24 h, rotated > 7 days; sealed successor copies wiped after 10 s |
 | `audit_log` | per privileged action | kept (small); export/prune is a future admin feature |
 
-The retention job is part of Phase 2 (see the [roadmap](../plans/roadmap.md)).
+**Retention job** (`internal/retention`, implemented in Phase 2): `Run(ctx)` runs once at start and
+then every hour; each target deletes at most 500 rows per statement and repeats until a batch comes
+back short, so a long backlog never holds the single SQLite writer for long. `retention_days: 0`
+disables pruning (keep everything). A failing target is logged and does not stop the others. The
+cutoff is `now - retention_days` with an injectable clock (tests use a fake).
+
+**Foreign-key cascades.** `DELETE /devices/{id}` removes, in the same statement and transaction,
+the device's `agent_bindings`, `device_status_history` and `commands` rows (`ON DELETE CASCADE`),
+including active commands: deleting a device cancels whatever was in flight for it (a wake in
+progress simply stops being tracked; nothing is sent to the machine). `commands.requested_by` is
+`ON DELETE SET NULL`. `audit_log` has no foreign keys, so the delete is recorded and the earlier
+entries remain. `PRAGMA foreign_keys` is on for every connection (section 2).
+
+**Cursors.** List endpoints use keyset pagination over indexed columns, no `OFFSET` (architecture
+§9): devices `(name COLLATE NOCASE, id)`, commands `(created_at, id)` and history `(changed_at, id)`
+descending. Cursors are not stored.
 
 ## 6. Migration process
 

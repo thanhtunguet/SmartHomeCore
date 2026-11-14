@@ -260,3 +260,41 @@ pair as the legitimate client; reuse after the window is still detected. The gra
 constant, not a config key. The JWT key cannot be rotated without signing everybody out.
 Supersedes the "JWT" and "login hygiene" lines of the earlier design notes only in detail, not in
 direction (ADR-010, ADR-011 stand).
+
+---
+
+## ADR-014 — Phase 2 decisions: manual probes feed hysteresis, client-side "wake many", urgent probing
+
+**Context.** Phase 2 left three questions open: whether `POST /devices/{id}/probe` should change the
+stored state, how to offer "wake many" (brief §3.4), and how a wake gets verified quickly without
+the commands engine and the monitor depending on each other.
+
+**Decision.**
+- **A manual probe is a real observation.** It goes through the same hysteresis tracker, updates
+  `status`, `last_checked_at`, `last_seen_at` and `last_latency_ms`, may append a history row
+  (reason `manual probe`) and notifies the commands engine. The response returns both the raw
+  result (`reachable`) and the status after hysteresis. Rejected: a probe that only reports and
+  stores nothing (the API would show `offline` while the list still says `online`, and a wake would
+  not complete from it), and a probe that bypasses hysteresis (one failed manual probe would flip
+  a healthy device to `offline`).
+- **"Wake many" is client-side fan-out.** The UI calls `wakeDevice` for each selected device. No
+  batch endpoint: wake is idempotent and per-device throttled (ADR-012), the 202 + `Command`
+  contract is per device, a batch would need its own partial-failure and throttle semantics, and
+  with a home-sized fleet the extra requests cost nothing. Revisit only if a client needs a single
+  atomic acknowledgement. The spec is unchanged.
+- **Urgent probing instead of an engine → monitor call.** The monitor selects "enabled devices plus
+  devices with an active command" from the database and probes the latter on every tick. The
+  commands engine therefore never calls the monitor to schedule a re-check, and the monitor never
+  imports the engine: it only knows a small `Observer` interface it defines, and `internal/app`
+  connects the two (`SetObserver`). The cost is one extra query per tick, which also gives restart
+  recovery for free (an active command after a restart makes its device urgent again).
+- **The monitor's tracker is seeded from the stored status** (not `unknown`) after a restart, so a
+  restart does not erase the status or write spurious history. Failure counters stay in memory.
+- **A stored `online` is confirmed before a wake becomes a no-op.** The engine asks the monitor for
+  one fresh probe, so a stale status cannot silently swallow a wake request.
+
+**Consequences.** A manual probe by any user affects the stored status; that is intended. A device
+with an active command is probed every tick (5 s by default) regardless of its interval. A client
+that wants an atomic "wake these N" must handle N responses. No new dependency (the conformance
+test uses `github.com/getkin/kin-openapi`, already a direct dependency for the spec-derived
+authorization policy; its `openapi3filter` and `routers/legacy` packages need no new module).

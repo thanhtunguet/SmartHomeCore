@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -13,7 +14,12 @@ import (
 	"github.com/thanhtunguet/homecore/internal/api"
 	"github.com/thanhtunguet/homecore/internal/audit"
 	"github.com/thanhtunguet/homecore/internal/auth"
+	"github.com/thanhtunguet/homecore/internal/commands"
 	"github.com/thanhtunguet/homecore/internal/config"
+	"github.com/thanhtunguet/homecore/internal/ddns"
+	"github.com/thanhtunguet/homecore/internal/devices"
+	"github.com/thanhtunguet/homecore/internal/monitoring"
+	"github.com/thanhtunguet/homecore/internal/retention"
 	"github.com/thanhtunguet/homecore/internal/secrets"
 	"github.com/thanhtunguet/homecore/internal/storage"
 	"github.com/thanhtunguet/homecore/internal/version"
@@ -84,6 +90,39 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 		log.Warn("no user accounts exist, nobody can sign in: run `homecore user add <username>` (add --config/--data-dir as for the server)")
 	}
 
+	devRepo := devices.NewSQLiteRepository(db)
+	devSvc := devices.NewService(devRepo, nil)
+	mon := monitoring.New(monitoring.Config{
+		Store:            devRepo,
+		Log:              log.With("component", "monitor"),
+		Tick:             cfg.Controller.Monitor.Tick,
+		Concurrency:      cfg.Controller.Monitor.Concurrency,
+		OfflineThreshold: cfg.Controller.Monitor.OfflineThreshold,
+	})
+	cmdRepo := commands.NewSQLiteRepository(db)
+	engine := commands.NewEngine(commands.Config{
+		Repo:             cmdRepo,
+		Devices:          devSvc,
+		Prober:           monitorProber{mon},
+		Log:              log.With("component", "commands"),
+		WakeDeadline:     cfg.Controller.Commands.WakeDeadline,
+		ShutdownDeadline: cfg.Controller.Commands.ShutdownDeadline,
+	})
+	engine.Register(commands.TypeWake, commands.WakeDispatcher{})
+	// TODO(phase-3): engine.Register(commands.TypeShutdown, <signed agent dispatcher>).
+	mon.SetObserver(engine) // the monitor completes wake/shutdown commands through the engine
+	prune := retention.New(retention.Config{
+		Days: cfg.Controller.RetentionDays,
+		Log:  log.With("component", "retention"),
+		Targets: []retention.Target{
+			{Name: "device_status_history", Prune: devRepo.PruneHistory},
+			{Name: "commands", Prune: cmdRepo.PruneTerminal},
+			{Name: "ddns_sync_history", Prune: func(ctx context.Context, cutoff time.Time, limit int) (int64, error) {
+				return ddns.PruneSyncHistory(ctx, db, cutoff, limit)
+			}},
+		},
+	})
+
 	srv, err := api.New(api.Deps{
 		Config:          cfg.Controller,
 		Mode:            cfg.Mode,
@@ -91,6 +130,10 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 		Log:             log,
 		DB:              db,
 		Auth:            authSvc,
+		Devices:         devSvc,
+		Commands:        engine,
+		Monitor:         mon,
+		Audit:           audit.NewWriter(db, nil),
 	})
 	if err != nil {
 		return err
@@ -99,9 +142,19 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return srv.Run(gctx) })
 	g.Go(func() error { return authSvc.Run(gctx) }) // refresh-token housekeeping
-	// TODO(phase-2): g.Go(monitor.Run), g.Go(commandDispatcher.Run), retention job.
+	g.Go(func() error { return mon.Run(gctx) })     // TCP probes, status persistence
+	g.Go(func() error { return engine.Run(gctx) })  // command recovery and deadlines
+	g.Go(func() error { return prune.Run(gctx) })   // retention_days pruning
 	// TODO(phase-4): g.Go(ddnsSyncer.Run).
 	return g.Wait()
+}
+
+// monitorProber lets the commands engine ask the monitor for a fresh probe.
+type monitorProber struct{ m *monitoring.Monitor }
+
+func (p monitorProber) Probe(ctx context.Context, deviceID string) (bool, error) {
+	out, err := p.m.ProbeNow(ctx, deviceID)
+	return out.Result.Reachable, err
 }
 
 func runAgent(ctx context.Context, cfg config.Config, log *slog.Logger) error {

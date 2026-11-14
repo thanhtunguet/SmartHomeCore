@@ -1,14 +1,16 @@
 // Package commands models asynchronous device commands (wake, shutdown) and their lifecycle
-// (docs/design/architecture.md §8.2, ADR-003).
+// (docs/design/architecture.md §8.2, ADR-003, ADR-012).
 //
-// TODO(phase-2/3): Repository (commands table; rely on the commands_one_active unique index for
-// dedup), Dispatcher component (WOL send / signed agent call with retries using the same
-// command_id), deadline sweeper, and audit_log entries.
+// Files: commands.go (types and the state machine), repo.go / repo_sqlite.go (persistence; the
+// commands_one_active unique index enforces dedup), engine.go (request flow, completion by monitor
+// observations, deadline sweep, restart recovery), wake.go (the Wake-on-LAN Dispatcher). Phase 3
+// registers a second Dispatcher for shutdown; the engine is already type-generic.
 package commands
 
 import (
 	"fmt"
 	"slices"
+	"time"
 )
 
 // Type is the kind of command.
@@ -59,4 +61,37 @@ func Transition(t Type, from, to Status) error {
 		return fmt.Errorf("illegal %s command transition %s → %s", t, from, to)
 	}
 	return nil
+}
+
+// Command is one wake or shutdown request and its progress.
+type Command struct {
+	ID             string
+	DeviceID       string
+	Type           Type
+	Status         Status
+	RequestedBy    string // user id; empty when the user no longer exists
+	ErrorCode      string // machine-readable, set when failed
+	Error          string // human-readable, set when failed
+	Attempts       int
+	DeadlineAt     *time.Time
+	SentAt         *time.Time
+	AcknowledgedAt *time.Time
+	CompletedAt    *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// Active reports whether the command is still in flight.
+func (c Command) Active() bool { return !c.Status.Terminal() }
+
+// Valid reports whether t is a known command type.
+func (t Type) Valid() bool { return t == TypeWake || t == TypeShutdown }
+
+// Valid reports whether s is a known status.
+func (s Status) Valid() bool {
+	switch s {
+	case StatusPending, StatusSent, StatusAcknowledged, StatusCompleted, StatusFailed, StatusTimedOut:
+		return true
+	}
+	return false
 }

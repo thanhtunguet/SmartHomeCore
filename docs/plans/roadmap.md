@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | Brief §7 (phases), §8 (MVP); [architecture](../design/architecture.md) |
-| Last updated | 2026-11-14 (Phase 1b authentication done) |
+| Last updated | 2026-11-14 (Phase 2 device management done) |
 
 Legend: `[x]` done and verified · `[~]` partially done · `[ ]` not started.
 Tick items in the same change that completes them, and add a changelog entry.
@@ -15,18 +15,18 @@ Tick items in the same change that completes them, and add a changelog entry.
 | 0 | Android compatibility spike (parallel to Phase 1) | Started: cross-compile verified |
 | 1 | Core foundation | **Done** |
 | 1b | JWT authentication (MVP; the brief places it under §3.1) | **Done** |
-| 2 | Device management | Building blocks done |
-| 3 | Secure Agent | Agent side done; Controller side pending |
+| 2 | Device management | **Done** |
+| 3 | Secure Agent | Agent side done; Controller side pending (agent binding storage done in Phase 2) |
 | 4 | DDNS and system monitoring | Interfaces only |
 | 5 | Android integration | Binding surface only |
 | 6 | Hardening | Not started |
 
 ## Next up (ordered)
 
-1. **Phase 2 — device CRUD + monitor job**: first user-visible feature (authentication is in place).
-2. **Phase 2 — WOL command flow**: the MVP "wake" story end to end.
-3. **Phase 3 — Controller key management + dispatcher**: the MVP "shutdown" story end to end.
-4. **Phase 0 — on-device Android spike**: should not slip past Phase 2.
+1. **Phase 3 — Controller key management + dispatcher**: the MVP "shutdown" story end to end (the generic command engine, the `Dispatcher` interface and the agent binding storage are in place).
+2. **Phase 0 — on-device Android spike**: slipped past Phase 2; do it before Phase 3 ends.
+3. **Phase 4 — DDNS** (the retention job already prunes `ddns_sync_history`).
+4. Re-run the UI against the real Controller (Phase 2 backend exists now, GAP-BE-01).
 
 ## Phase 0 — Android compatibility spike
 
@@ -64,23 +64,26 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [x] `audit_log` writes for login success/failure, logout, token reuse, account changes; reusable `internal/audit` writer (REQ-AUTH-014)
 - [x] Tests: login rate limit (429), token expiry, refresh reuse → family revoked, reuse inside the grace window → same pair
 
-## Phase 2 — Device management
+## Phase 2 — Device management ✅
 
 - [x] Device model and schema (`devices`, `agent_bindings`, `device_status_history`)
 - [x] TCP probe + hysteresis tracker (`monitoring.Probe`, `monitoring.Tracker`)
 - [x] WOL packet, MAC validation, directed-broadcast resolution (`wol`)
 - [x] Command state machine (`commands.Transition`) + DB-enforced dedup
-- [ ] Devices repository + service (validation, `409` on duplicate name)
-- [ ] Handlers: list/create/get/update/delete devices, probe, history (cursor pagination); honour `device_type`/`os`, clear-with-`""` on `PATCH`, and the fixed list order (REQ-API-017)
+- [x] Devices repository + service (validation, `409` on duplicate name, agent binding persistence) (REQ-DEV-001..008)
+- [x] Handlers: list/create/get/update/delete devices, probe, history (cursor pagination); honour `device_type`/`os`, clear-with-`""` on `PATCH`, and the fixed list order (REQ-API-017)
 - [x] Migration `0002`: `device_type`, `os`, `last_latency_ms` on `devices`
 - [x] Per-device wake/shutdown throttle, 1 request per second for all users (`middleware.DeviceThrottle`, REQ-API-018)
 - [x] Migration `0003`: `users.role` dropped (ADR-011)
-- [ ] Monitor component: tick, due devices, worker pool, jitter, persist transitions, write `last_latency_ms`
-- [ ] Commands repository + dispatcher; `wake` endpoint and wake verification via monitor. Idempotent: return the active wake command; if the device is already online, complete at once (REQ-API-019)
-- [ ] `power_transition` derived in device responses
-- [ ] Commands list/get handlers
-- [ ] Retention job (`retention_days`)
-- [ ] "Wake many" (brief §3.4): decide between a batch endpoint and client-side fan-out
+- [x] Monitor component: tick, due devices, worker pool, jitter, persist transitions, write `last_latency_ms` (REQ-MON-001..009)
+- [x] Commands repository + type-generic engine + deadline job + restart recovery; `wake` endpoint and wake verification via the monitor. Idempotent: returns the active wake command; if the device is already online, completes at once (REQ-API-019 for wake, REQ-CMD-001..008)
+- [x] `power_transition` derived in device responses (REQ-DEV-009)
+- [x] Commands list/get handlers (REQ-CMD-009)
+- [x] Retention job (`retention_days`) for commands, status history and DDNS sync history (REQ-RET-001)
+- [x] "Wake many" (brief §3.4): **client-side fan-out**, no batch endpoint (ADR-014, REQ-CMD-012)
+- [x] Spec conformance test helper (every response of the implemented operations validated against `api/openapi.yaml`)
+- [x] Audit entries for device create/update/delete/agent removal/wake (REQ-DEV-010)
+- [ ] Follow-up: regenerate the frontend's generated types (spec edits, see [http-api.md](../requirements/http-api.md)); needs a frontend change
 
 ## Phase 3 — Secure Agent
 
@@ -90,8 +93,8 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [x] systemd units and polkit rule (`deploy/`)
 - [x] `devtools keygen|send`
 - [ ] Controller key management: generate on first run into `controller_keys` (sealed); `GET /api/v1/system/controller-key`
-- [ ] Controller dispatcher for `shutdown`: signed POST, 2 s timeout, at most one immediate retry with the same `command_id` (fail fast, ADR-012), map agent error codes into the command; already offline → complete without contacting the agent
-- [ ] Device ↔ agent binding in the device API, including `DELETE /devices/{id}/agent`
+- [ ] Controller dispatcher for `shutdown` (a `commands.Dispatcher` registered in `internal/app`, no engine change; the engine, deadline job, recovery and `power_transition` already handle both types): signed POST, 2 s timeout, at most one immediate retry with the same `command_id` (fail fast, ADR-012), map agent error codes into the command; already offline → complete without contacting the agent
+- [x] Device ↔ agent binding in the device API, including `DELETE /devices/{id}/agent` (done in Phase 2: stored in `agent_bindings`, REQ-DEV-006; `agent.status`/`version`/`last_ok_at` still wait for the dispatcher)
 - [ ] `audit_log` for shutdown requests (with the acting user)
 - [ ] `AgentBinding.status`, `version`, `last_ok_at` filled from the dispatcher's last contact (REQ-API-021, GAP-API-09)
 - [ ] `GET /api/v1/activity` (cursor list fed by `audit_log` and command history). Cheap once the audit writes exist; what the UI will do with it is not decided yet, so add it to the spec only when it is picked up (GAP-API-05)
@@ -133,7 +136,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 | Signed agent announce for automatic IP updates | ADR-002 |
 | Tests for CLI flag precedence | REQ-RT-003 gap |
 | Test `/readyz` 503 path and `WithTx` rollback | REQ-API-004, REQ-ST-004 |
-| Re-run the UI against the real Controller as Phases 1b/2/3/4 land (UI is verified only against a mock) | GAP-BE-01..03 |
+| Re-run the UI against the real Controller as Phases 3/4 land (UI is verified only against a mock; Phase 2 verified the API shapes with curl against `mappers.ts`, not the running UI) | GAP-BE-01..03 |
 | Hostname field in the device form (once hostname-based probing exists) | GAP-API-15 |
 | Run the frontend checks (`make ui-check`) in CI once a CI pipeline exists | GAP-INF-06, 07, REQ-UI-016 |
 | `homecore user disable\|enable\|delete` (the `users.disabled` flag is honoured but only settable with SQL); UI for changing the password | GAP-API-14, REQ-AUTH known gaps |
@@ -141,3 +144,6 @@ Tick items in the same change that completes them, and add a changelog entry.
 | Per-account login lockout (only per-IP limit exists); separate rate-limit bucket for `refresh`/`logout` | REQ-AUTH known gaps |
 | Account creation on Android (no CLI): decide in Phase 5 how the host app calls `auth.Accounts` through `mobile` | REQ-RT known gaps |
 | Release pipeline must run `make ui-build` before `make cross` | GAP-INF-10 |
+| Persist the monitor's consecutive-failure counters across restarts (today only the status survives) | REQ-MON-004 known gap |
+| Shorten the deadline sweep (5 s) or complete deadline exactly via a timer, if second-level accuracy of `timed_out` ever matters | REQ-CMD-006 |
+| Test the `ddns_sync_history` prune SQL once Phase 4 fills the table | REQ-RET-001 |

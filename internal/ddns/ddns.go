@@ -10,7 +10,11 @@ package ddns
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
+	"time"
+
+	"github.com/thanhtunguet/homecore/internal/storage"
 )
 
 // RecordType is a DNS record type managed by DDNS.
@@ -30,4 +34,15 @@ type IPDiscoverer interface {
 type DNSProvider interface {
 	GetRecord(ctx context.Context, zoneID, name string, typ RecordType) (id string, content netip.Addr, err error)
 	UpsertRecord(ctx context.Context, zoneID, recordID, name string, typ RecordType, ip netip.Addr, ttl int, proxied bool) (id string, err error)
+}
+
+// PruneSyncHistory deletes at most limit ddns_sync_history rows older than cutoff (the retention
+// job's DDNS target). The syncer that writes the table arrives in Phase 4.
+func PruneSyncHistory(ctx context.Context, db *storage.DB, cutoff time.Time, limit int) (int64, error) {
+	res, err := db.ExecContext(ctx, `DELETE FROM ddns_sync_history WHERE id IN
+		(SELECT id FROM ddns_sync_history WHERE at < ? LIMIT ?)`, storage.Millis(cutoff), limit)
+	if err != nil {
+		return 0, fmt.Errorf("prune ddns sync history: %w", err)
+	}
+	return res.RowsAffected()
 }

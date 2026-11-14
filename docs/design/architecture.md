@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1 |
-| Last reviewed | 2026-11-14 |
+| Last reviewed | 2026-11-14 (Phase 2: monitor, commands, cursors) |
 | Requirements | [requirements/overview.md](../requirements/overview.md) |
 | Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs) |
 | API contract | [api/openapi.yaml](../../api/openapi.yaml) (source of truth) |
@@ -189,22 +189,63 @@ implementation or a test that needs it.
 ### 6.2 Device registry (`internal/devices`)
 Fields (see `devices` table): `id`, `name`, `description`, `hostname`, `ip_address`, `mac_address`,
 `wol_broadcast_address`, `wol_port`, `monitor_port`, `monitor_interval`, `monitor_timeout`,
-`enabled`, `status`, `last_seen_at`, `last_checked_at`, `created_at`, `updated_at`, plus an optional
-**agent binding** (`agent_id`, `agent_port`, `agent_scheme`).
+`enabled`, `device_type`, `os`, `status`, `last_seen_at`, `last_checked_at`, `last_latency_ms`,
+`created_at`, `updated_at`, plus an optional **agent binding** (`agent_id`, `agent_port`,
+`agent_scheme`, table `agent_bindings`).
 - Probe target = `hostname` if set, else `ip_address`.
 - MAC normalised to `aa:bb:cc:dd:ee:ff`. `shutdown_secret` from the brief is **removed** (ADR-001).
 - Read APIs never return secrets (there are none on devices any more).
+- `Service` (validation, normalisation, defaults, cursors) sits on a `Repository` interface
+  (`repo.go`) implemented by `SQLiteRepository` (`repo_sqlite.go`). Validation lives in
+  `validate.go`; failures are a `ValidationError` listing every problem, mapped to `400`. Name
+  uniqueness is case-insensitive (`UNIQUE(name COLLATE NOCASE)`, `ErrNameTaken` → `409`).
+- **Agent binding persistence**: the binding is a row of `agent_bindings` keyed by `device_id`.
+  `PATCH` with an `agent` object upserts it (port default 9750, scheme default `http`; an
+  `agent_id` already bound to another device is `ErrAgentTaken` → `409`). `DELETE /devices/{id}/agent`
+  removes it and is idempotent (`204` with or without a binding; `404` only for an unknown device).
+  The binding lives in the same transaction as the device row it belongs to. `agent.status`,
+  `version` and `last_ok_at` stay absent until the Phase 3 dispatcher fills them.
+- **Delete** removes the device and, through `ON DELETE CASCADE`, its `agent_bindings`,
+  `device_status_history` and `commands` rows (database.md §Lifecycle). It writes `audit_log`
+  (`device.delete`, `details.name`); audit rows are not tied to devices by a foreign key and survive.
+- Pagination: the device list is ordered `name COLLATE NOCASE, id` and paged with a keyset cursor
+  (see "Cursors" below).
 
 ### 6.3 Online monitor (`internal/monitoring`)
 - TCP connect probe (`net.DialTimeout`), not Telnet.
-- One scheduler tick every `monitor.tick` (default 5 s) selects devices whose `next_probe_at` is due;
-  per-device interval (default 30 s) + random jitter (±10 %); bounded worker pool (default 8);
-  timeout default 2 s.
-- **Hysteresis**: 1 success → `online`; `offline_threshold` (default 2) consecutive failures →
-  `offline`. Counters live in memory; `unknown` after restart until the first conclusive result.
-- Writes `device_status_history` only on transitions; updates `last_seen_at` on success.
-- Exposes an `Observe(deviceID) <-chan Status` hook used by the command dispatcher to verify
-  wake/shutdown outcomes, and `ProbeNow(id)` for `POST /devices/{id}/probe`.
+- `Monitor.Run(ctx)` checks due devices at once and then on every `monitor.tick` (default 5 s).
+  Each tick asks the store for `MonitorTargets` (every enabled device plus any device with an active
+  command), picks the devices whose in-memory `next` time has come and probes them through a bounded
+  worker pool (`monitor.concurrency`, default 8). Per-device interval (default 30 s) with jitter:
+  the next probe is at `interval - 10 % + random(0..20 %)`. Timeout default 2 s. The Monitor
+  stops when ctx is cancelled; probes cut short by the cancellation are not recorded.
+- **Urgent devices**: a device with an active wake/shutdown command is probed on every tick,
+  whatever its interval, so a command completes within about one tick of the machine changing
+  state (this replaces the "re-check soon after a wake" hook; it needs no coupling from the
+  engine to the monitor: `MonitorTargets` reports the flag from the `commands` table). A disabled
+  device with an active command is probed too, until the command is terminal.
+- **Hysteresis** (`Tracker`): 1 success → `online`; `offline_threshold` (default 2) consecutive
+  failures → `offline`. One probe at a time per device (a per-device mutex; the tick skips a device
+  already being probed).
+- **Restart seeding (deviation from the first design)**: the tracker is seeded from the stored
+  status instead of starting at `unknown`, so a Controller restart neither erases the status nor
+  writes spurious `unknown → offline` history rows. Failure counters are still in memory only: after
+  a restart an online device needs `offline_threshold` fresh failures to go offline.
+- Each observation is persisted in one transaction (`RecordObservation`): `status`,
+  `last_checked_at`, on success `last_seen_at` and `last_latency_ms`, and a `device_status_history`
+  row **only on a transition**, with a `reason` (`probe` from the tick, `manual probe` from the API).
+  If persistence fails the tracker is rolled back so memory never runs ahead of the database; a
+  device deleted meanwhile is forgotten.
+- **Manual probe** (`ProbeNow`, `POST /devices/{id}/probe`) works on disabled devices and **feeds
+  the same tracker** and the stored state (decision recorded in ADR-014): a manual probe is a real
+  observation, and treating it separately would make the API and the stored status disagree. The
+  response carries both the raw result (`reachable`) and the status after hysteresis (`status`), so
+  one failed probe of an online device reports `reachable: false, status: online`.
+- **Observer hook** (replaces the `Observe(deviceID) <-chan Status` sketch): `monitoring.Observer`
+  is an interface defined in `monitoring` and implemented by the commands engine. It is called
+  on every status transition and on every observation of a device with an active command, on the
+  probing goroutine (it must be quick). `app` connects the two with `SetObserver` before `Run`
+  (this breaks the construction cycle monitor ↔ engine).
 
 ### 6.4 Wake-on-LAN (`internal/wol`)
 - Magic packet: 6 × `0xFF` + 16 × MAC (102 bytes), UDP to broadcast:9 (configurable).
@@ -216,8 +257,36 @@ Fields (see `devices` table): `id`, `name`, `description`, `hostname`, `ip_addre
 - Types: `wake`, `shutdown` (later `reboot`). Every request creates a row with a UUID `command_id`
   and returns `202 Accepted` immediately; the HTTP request never waits for the machine.
 - **Dedup**: if a non-terminal command of the same type exists for the device, return it instead of
-  creating another.
-- Dispatcher goroutine drives state transitions (§8.2) and records `audit_log` entries.
+  creating another. The check is enforced by the database, not only in code: the partial unique
+  index `commands_one_active` on `(device_id, type) WHERE status IN ('pending','sent','acknowledged')`
+  makes a concurrent second insert fail with `ErrActiveExists`, and the engine then returns the
+  winner. (Test: 16 concurrent requests produce one command.)
+- The engine is **type-generic**: `Engine.Request` does the common work (device lookup,
+  idempotency, already-in-target-state, insert, dispatch, state transition) and delegates what is
+  specific to a `Dispatcher` registered per type with `Register` (by `app`). A `Dispatcher` has
+  `Precheck(device)` (a precondition error becomes `409`, nothing is stored) and
+  `Dispatch(ctx, command, device) Result` (`Sent`, or a failure with `error_code`/message). Phase 3
+  adds the shutdown dispatcher without touching the engine. `WakeDispatcher` (`wake.go`) requires a
+  MAC, resolves the broadcast address with `wol.BroadcastFor` and sends with `wol.Send` through a
+  `WakeSender` interface (a fake in tests).
+- **Request flow** (wake): get the device → `Precheck` → active command of this type? return it →
+  device already `online`? confirm with a fresh probe (a stored `online` can be stale) and insert a
+  command created `completed` → insert `pending` → dispatch (`sent`, or `failed` with
+  `wol_send_failed`) → return the stored command. `requested_by` comes from `auth.FromContext`.
+- **Completion**: `DeviceObserved` (the monitor's Observer) completes a `sent`/`acknowledged`
+  command whose target status was observed (`online` for wake, `offline` for shutdown).
+- **Deadline job**: `Engine.Run` sweeps every `DefaultSweepInterval` (5 s): `sent`/`acknowledged`
+  commands past `deadline_at` become `timed_out`; so the worst lag between a deadline and the
+  state change is about 5 s.
+- **Restart recovery** (`Recover`, run first in `Run`): `pending` commands (dispatch never finished
+  because the process died) are dispatched again if still within their deadline, else `failed` with
+  `error_code: interrupted`; `sent` commands keep their state and are completed or timed out
+  normally (the monitor probes the device on every tick while the command is active).
+- `power_transition` is derived: `Engine.PowerTransitions(ids)` returns it for a batch of devices
+  with a single query (list endpoints do not issue one query per device).
+- Every state change is a compare-and-set (`Update(id, from, change)`), so the monitor, the deadline
+  job and a request cannot overwrite each other; transitions are validated by `Transition`.
+- Handlers write `audit_log` (`device.wake`) for each accepted wake.
 
 ### 6.6 Agent (`internal/agent`)
 - Separate listener (default `:9750`), separate config, no DB (state in a small data dir:
@@ -315,7 +384,11 @@ secret material belongs to the Controller, not the device.
 - At most one wake/shutdown request per device per second (all users, both types): `429 rate_limited`
   from `middleware.DeviceThrottle`, mirrored by the UI.
 - `wake` skips `acknowledged` (no agent involved).
-- Transitions are validated by `commands.CanTransition`; illegal transitions are programming errors.
+- Transitions are validated by `commands.Transition`; illegal transitions are programming errors.
+- Implementation notes (Phase 2): a command whose dispatch was interrupted by a restart is `failed`
+  with `error_code: interrupted`; a failed magic-packet send is `failed` with `wol_send_failed`; a
+  wake of an `online` device is created `completed` with no packet. A wake of any other device sends
+  the packet and stays `sent` until the monitor sees the device online or the deadline passes.
 
 ---
 
@@ -341,10 +414,18 @@ Namespace `/api/v1`; full contract in `api/openapi.yaml`. Summary (brief §4, pl
 | ✚POST | `/api/v1/ddns/cloudflare/zones` · `/ddns/cloudflare/zones/{zone_id}/records` | user; read-only lookups for the form dropdowns (`POST` so the token stays out of URLs) |
 | GET | `/healthz`, `/readyz`, `/api/openapi.json`, `/api/docs` | public |
 
-Pagination: `?limit=&cursor=` (cursor = opaque, UUIDv7-based), no total count. Order is fixed:
+Pagination: `?limit=&cursor=` (`limit` 1..200, default 50; an explicit `0` or a larger value is
+`400`), no total count; `next_cursor` is present only when more items exist. Order is fixed:
 devices by name (case-insensitive), commands and status history newest first. Times: RFC 3339 UTC
 in JSON. On `PATCH /devices/{id}` an empty string clears an optional text field; the agent binding
 is removed with `DELETE /devices/{id}/agent`.
+
+**Cursors** (`internal/page`): `base64url(JSON)` of the sort key of the last item, decoded with
+unknown fields rejected so a cursor of another list is `400 bad_request`, never silently
+accepted. Clients treat it as opaque. Keys: devices `{"n": name (as sorted), "i": id}` with
+`WHERE (name COLLATE NOCASE, id) > (n, i)`; status history `{"t": changed_at ms, "i": row id}`
+and commands `{"t": created_at ms, "i": id}`, both `ORDER BY t DESC, i DESC`. Keyset paging
+stays correct when rows are inserted or deleted between pages (no offset drift).
 
 ---
 

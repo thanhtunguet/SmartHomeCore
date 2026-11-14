@@ -20,9 +20,13 @@ import (
 	"github.com/thanhtunguet/homecore/internal/api/gen"
 	"github.com/thanhtunguet/homecore/internal/api/handlers"
 	"github.com/thanhtunguet/homecore/internal/api/middleware"
+	"github.com/thanhtunguet/homecore/internal/audit"
 	"github.com/thanhtunguet/homecore/internal/auth"
+	"github.com/thanhtunguet/homecore/internal/commands"
 	"github.com/thanhtunguet/homecore/internal/config"
+	"github.com/thanhtunguet/homecore/internal/devices"
 	"github.com/thanhtunguet/homecore/internal/httpx"
+	"github.com/thanhtunguet/homecore/internal/monitoring"
 	"github.com/thanhtunguet/homecore/internal/storage"
 	"github.com/thanhtunguet/homecore/web"
 )
@@ -45,6 +49,12 @@ type Deps struct {
 	DB              *storage.DB
 	Authn           auth.Authenticator // defaults to Auth, then to auth.RejectAll
 	Auth            *auth.Service      // login/refresh/logout/me; nil answers 501
+
+	// Device management; each nil service makes its operations answer 501.
+	Devices  *devices.Service
+	Commands *commands.Engine
+	Monitor  *monitoring.Monitor
+	Audit    *audit.Writer
 }
 
 // Server is the Controller HTTP server.
@@ -135,6 +145,7 @@ func newRouter(d Deps) (http.Handler, error) {
 
 	h := handlers.New(d.DB, d.Log)
 	h.Auth = d.Auth
+	h.Devices, h.Commands, h.Monitor, h.Audit = d.Devices, d.Commands, d.Monitor, d.Audit
 	h.Info = handlers.InfoSource{Mode: string(d.Mode), Controller: d.Config}
 	gen.HandlerWithOptions(h, gen.ChiServerOptions{
 		BaseRouter: r,

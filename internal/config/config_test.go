@@ -40,11 +40,14 @@ agent:
 
 func TestLoadBytesRejectsUnknownFieldsAndBadValues(t *testing.T) {
 	cases := map[string]string{
-		"unknown field":         "mdoe: agent\n",
-		"bad mode":              "mode: server\n",
-		"bad action":            "mode: agent\nagent:\n  allowed_actions: [rm-rf]\n",
-		"removed bootstrap key": "controller:\n  auth:\n    bootstrap_admin_user: admin\n", // ADR-011: accounts come from `homecore user add`
-		"same listener":         "mode: both\ncontroller:\n  listen: \":8080\"\nagent:\n  listen: \":8080\"\n",
+		"unknown field":          "mdoe: agent\n",
+		"bad mode":               "mode: server\n",
+		"bad action":             "mode: agent\nagent:\n  allowed_actions: [rm-rf]\n",
+		"removed bootstrap key":  "controller:\n  auth:\n    bootstrap_admin_user: admin\n", // ADR-011: accounts come from `homecore user add`
+		"zero wake deadline":     "controller:\n  commands:\n    wake_deadline: 0s\n",
+		"zero shutdown deadline": "controller:\n  commands:\n    shutdown_deadline: 0s\n",
+		"negative retention":     "controller:\n  retention_days: -1\n",
+		"same listener":          "mode: both\ncontroller:\n  listen: \":8080\"\nagent:\n  listen: \":8080\"\n",
 	}
 	for name, yml := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -71,5 +74,13 @@ func TestShippedConfigFilesAreValid(t *testing.T) {
 				t.Errorf("%s (mode %s): %v", filepath.Base(f), mode, err)
 			}
 		}
+	}
+}
+
+// REQ-RT-004: retention_days 0 is valid (keep everything); the command deadlines must be positive.
+func TestRetentionZeroKeepsEverything(t *testing.T) {
+	cfg, err := LoadBytes([]byte("controller:\n  retention_days: 0\n"), nil)
+	if err != nil || cfg.Controller.RetentionDays != 0 {
+		t.Fatalf("retention_days 0: %+v, %v", cfg.Controller.RetentionDays, err)
 	}
 }

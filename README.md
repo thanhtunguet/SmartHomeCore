@@ -71,7 +71,8 @@ configs/ deploy/     config & service files     internal/{auth,devices,monitorin
 
 ## Status
 
-Phase 1 foundation is in place: config, lifecycle and modes, HTTP server, spec-first API, offline
-Swagger UI, SQLite with the full schema, and the agent protocol with replay protection. The other
-modules are stubs; protected endpoints answer `401` until JWT auth lands and `501` until they are
-implemented. See [docs/plans/roadmap.md](docs/plans/roadmap.md).
+Phases 1, 1b and 2 are done: config, lifecycle and modes, HTTP server, spec-first API, offline
+Swagger UI, SQLite, the agent protocol, JWT authentication, and device management (CRUD, TCP
+monitoring, status history, Wake-on-LAN with idempotent commands, retention). Shutdown dispatch,
+system metrics and DDNS are next; their endpoints answer `501` with a valid token (and `401`
+without). See [docs/plans/roadmap.md](docs/plans/roadmap.md).

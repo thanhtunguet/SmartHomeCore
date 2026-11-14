@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | [`BRIEF.md`](../../BRIEF.md) (Technical Brief v0.1, Vietnamese) |
-| Last reviewed | 2026-11-14 |
+| Last reviewed | 2026-11-14 (Phase 2) |
 | Owner | Project maintainers |
 
 This document turns the brief into the project's requirements baseline. It records which brief
@@ -52,8 +52,8 @@ One build supports both roles; configuration selects `controller`, `agent` or `b
 | MVP item | Status | Detail |
 |----------|--------|--------|
 | Controller + Agent on macOS/Linux | **Implemented** | [runtime-and-configuration.md](runtime-and-configuration.md) |
-| Device CRUD and TCP online monitoring | **Partial.** Schema, probe and hysteresis done; CRUD and monitor job pending | [roadmap](../plans/roadmap.md) Phase 2 |
-| Wake-on-LAN | **Partial.** Packet library done; API and command flow pending | Phase 2 |
+| Device CRUD and TCP online monitoring | **Implemented** (Phase 2): CRUD, probe, history, monitor job with hysteresis, status history, retention | [devices-and-commands.md](devices-and-commands.md) |
+| Wake-on-LAN | **Implemented** (Phase 2): `wakeDevice` with idempotent, fail-fast command lifecycle, completed by the monitor or timed out | [devices-and-commands.md](devices-and-commands.md) |
 | Secure shutdown Agent on Linux | **Implemented** (agent side); Controller dispatch pending | [shutdown-agent.md](shutdown-agent.md) |
 | SQLite | **Implemented** | [storage-and-secrets.md](storage-and-secrets.md) |
 | JWT authentication | **Implemented** (Phase 1b): argon2id, HS256 access tokens, rotating refresh tokens with reuse detection and grace window, `homecore user` CLI; no roles (ADR-011) | [authentication.md](authentication.md) |
@@ -76,6 +76,7 @@ has a stable ID, a status and the test that verifies it.
 |----------|--------|--------------|
 | [runtime-and-configuration.md](runtime-and-configuration.md) | `REQ-RT` | §1 roles, §2, §5 modes |
 | [http-api.md](http-api.md) | `REQ-API` | §3.1, §4, §6 (API zone) |
+| [devices-and-commands.md](devices-and-commands.md) | `REQ-DEV`, `REQ-MON`, `REQ-CMD`, `REQ-RET` | §3.2, §3.3, §3.4, retention (§3.7) |
 | [authentication.md](authentication.md) | `REQ-AUTH` | §3.1 (JWT), §6.1, §6.6, §6.7 (audit) |
 | [storage-and-secrets.md](storage-and-secrets.md) | `REQ-ST`, `REQ-SEC` | §3.7, §6 (secrets) |
 | [shutdown-agent.md](shutdown-agent.md) | `REQ-AG` | §3.5, §6 (agent zone) |
@@ -135,13 +136,13 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 | # | Brief point | Status | Ref |
 |---|-------------|--------|-----|
 | 3.2.1 | Devices identified by UUID | Implemented (schema, UUIDv7) | [database](../design/database.md#devices) |
-| 3.2.2 | Fields: name, description, ip, mac, monitor_port, enabled, last_seen_at, status, timestamps | Implemented (schema) | database |
+| 3.2.2 | Fields: name, description, ip, mac, monitor_port, enabled, last_seen_at, status, timestamps | Implemented (schema, API) | database, REQ-DEV-001/002 |
 | 3.2.3 | `shutdown_port` | Changed. Moved to `agent_bindings.port` | ADR-001, ADR-002 |
 | 3.2.4 | `shutdown_secret` | Changed. Removed; Ed25519 trust instead | ADR-001 |
-| 3.2.5 | Advanced: `monitor_timeout`, `monitor_interval`, `wol_broadcast_address` | Implemented (schema) | database |
+| 3.2.5 | Advanced: `monitor_timeout`, `monitor_interval`, `wol_broadcast_address` | Implemented (schema, validated API, used by the monitor and WOL) | database, REQ-DEV-002 |
 | 3.2.6 | Advanced: `shutdown_protocol` | Changed. Single protocol v1, versioned in payload | [agent-protocol](../design/agent-protocol.md) |
 | 3.2.7 | Never return secrets from read APIs | Implemented by design (no secret columns on devices; DDNS token write-only in spec) | REQ-SEC-004 |
-| 3.2.8 | Device CRUD | Planned | Phase 2 |
+| 3.2.8 | Device CRUD | Implemented (Phase 2) | REQ-DEV-001..011 |
 
 ### §3.3 Online device monitor
 
@@ -150,7 +151,7 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 | 3.3.1 | TCP connect probe to a configured port (not Telnet) | Implemented (library) | `monitoring.Probe`, `TestProbe` |
 | 3.3.2 | States `online` / `offline` / `unknown` | Implemented (enum, schema) | [architecture §8.1](../design/architecture.md) |
 | 3.3.3 | Hysteresis: 2 failures → offline, 1 success → online | Implemented (library) | `monitoring.Tracker`, `TestTrackerHysteresis` |
-| 3.3.4 | Scheduler every 30 s, 1–3 s timeout, concurrency limit, jitter | Planned (config keys exist) | Phase 2 |
+| 3.3.4 | Scheduler every 30 s, 1–3 s timeout, concurrency limit, jitter | Implemented (Phase 2): per-device interval (default 30 s, tick 5 s), timeout default 2 s, bounded pool, ±10 % jitter, active-command devices probed every tick | REQ-MON-001..009 |
 
 ### §3.4 Wake-on-LAN
 
@@ -158,10 +159,10 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 |---|-------------|--------|-----|
 | 3.4.1 | UDP magic packet to subnet broadcast | Implemented (library, directed broadcast) | `wol.Send`, `TestMagicPacketLayout`, `TestDirectedBroadcast` |
 | 3.4.2 | Validate MAC format | Implemented | `wol.ParseMAC`, `TestParseMAC` |
-| 3.4.3 | Wake one device | Planned (API in spec) | Phase 2 |
-| 3.4.4 | Wake many devices | Planned | Phase 2 |
-| 3.4.5 | Wake history | Planned (`commands` table ready) | database |
-| 3.4.6 | Optional wait-for-online; `waking` state | Changed. Derived `power_transition` + command lifecycle; Planned | [architecture §8](../design/architecture.md) |
+| 3.4.3 | Wake one device | Implemented (Phase 2) | REQ-CMD-001..006 |
+| 3.4.4 | Wake many devices | **Changed (decision):** client-side fan-out, one `wakeDevice` per device; no batch endpoint | REQ-CMD-012, ADR-014 |
+| 3.4.5 | Wake history | Implemented (Phase 2): `GET /commands` with `device_id`/`status` filters, `GET /commands/{id}`, retention | REQ-CMD-009, REQ-RET-001 |
+| 3.4.6 | Optional wait-for-online; `waking` state | Changed. Derived `power_transition` + command lifecycle (the wake command stays `sent` until the monitor sees the device online); Implemented for wake | REQ-DEV-009, REQ-CMD-006, [architecture §8](../design/architecture.md) |
 
 ### §3.5 Shutdown agent
 
@@ -216,8 +217,8 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 
 | # | Brief point | Status | Ref |
 |---|-------------|--------|-----|
-| 4.1 | All draft endpoints (auth, devices, wake/shutdown/probe/history, metrics, DDNS, commands, docs) | Specified in `api/openapi.yaml`; health, docs, `/auth/*` and `/system/info` implemented; the rest return 501 with a valid token (401 without) | REQ-API-006 |
-| 4.2 | Wake/shutdown create a `command_id`; HTTP does not wait for the machine | Specified (`202` + `Command`); dedup enforced in DB | REQ-ST-005 |
+| 4.1 | All draft endpoints (auth, devices, wake/shutdown/probe/history, metrics, DDNS, commands, docs) | Specified in `api/openapi.yaml`; health, docs, `/auth/*`, `/system/info`, devices (CRUD, probe, history, wake, agent removal) and commands implemented; the rest (shutdown, metrics, controller key, DDNS) return 501 with a valid token (401 without) | REQ-API-006 |
+| 4.2 | Wake/shutdown create a `command_id`; HTTP does not wait for the machine | Wake Implemented (`202` + `Command`, dedup enforced in DB); shutdown Planned (Phase 3) | REQ-ST-005, REQ-CMD-001/003 |
 
 ### §5 Source code architecture
 
@@ -239,7 +240,7 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 | 6.4 | Cloudflare client with scoped token | Planned | Phase 4 |
 | 6.5 | Never expose the Agent to the Internet; prefer VPN | Documented (`deploy/README.md`, config comments) | REQ-AG-012 |
 | 6.6 | JWT secret ≠ Agent secret | Implemented (JWT key generated and sealed separately; the Controller Ed25519 key arrives in Phase 3) | REQ-AUTH-004, REQ-SEC-005 |
-| 6.7 | Shutdown requires admin and writes audit log | **Changed:** no roles (ADR-011), any authenticated user. `audit_log` writer exists (`internal/audit`, used by login/logout/account changes); the shutdown entry arrives with Phase 3 | REQ-API-008, REQ-AUTH-014 |
+| 6.7 | Shutdown requires admin and writes audit log | **Changed:** no roles (ADR-011), any authenticated user. `audit_log` writer exists (`internal/audit`, used by login/logout/account changes and, since Phase 2, device create/update/delete/agent removal/wake); the shutdown entry arrives with Phase 3 | REQ-API-008, REQ-AUTH-014, REQ-DEV-010 |
 | 6.8 | Private keys and Cloudflare tokens protected at rest | Partial (sealer implemented; used for the JWT key and refresh-grace copies; Controller key and DDNS tokens pending) | REQ-SEC-002, REQ-AUTH-004 |
 | 6.9 | Acknowledge before executing shutdown | Implemented | REQ-AG-009 |
 | 6.10 | Agent only runs predefined commands | Implemented | REQ-AG-005 |

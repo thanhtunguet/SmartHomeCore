@@ -257,6 +257,12 @@ func (c Config) Validate() error {
 		if ctl.Monitor.Concurrency < 1 || ctl.Monitor.OfflineThreshold < 1 || ctl.Monitor.Tick <= 0 {
 			add("controller.monitor: concurrency, offline_threshold and tick must be positive")
 		}
+		if ctl.Commands.WakeDeadline <= 0 || ctl.Commands.ShutdownDeadline <= 0 {
+			add("controller.commands: wake_deadline and shutdown_deadline must be > 0")
+		}
+		if ctl.RetentionDays < 0 {
+			add("controller.retention_days: must be >= 0 (0 keeps everything)")
+		}
 	}
 
 	if c.Mode.RunsAgent() {

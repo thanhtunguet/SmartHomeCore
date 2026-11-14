@@ -1,16 +1,16 @@
 // Package monitoring determines device reachability with TCP connect probes (not Telnet) and
 // applies hysteresis so flaky networks do not make status flap.
 //
-// TODO(phase-2): Monitor component — tick every cfg.Tick, pick due devices, run probes through a
-// bounded worker pool with jitter, persist transitions to device_status_history, update
-// last_seen_at/last_checked_at, and expose ProbeNow(id) plus an observer hook for the commands
-// dispatcher.
+// Files: monitoring.go (probe and hysteresis Tracker), monitor.go (the Monitor component: tick,
+// due devices, worker pool, persistence, manual probe, observer hook).
 package monitoring
 
 import (
 	"context"
+	"errors"
 	"net"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/thanhtunguet/homecore/internal/devices"
@@ -22,6 +22,29 @@ type ProbeResult struct {
 	Latency   time.Duration
 	CheckedAt time.Time
 	Err       error
+}
+
+// FailureReason is a short, stable description of why the probe failed ("" when it succeeded).
+func (r ProbeResult) FailureReason() string {
+	var dnsErr *net.DNSError
+	switch {
+	case r.Err == nil:
+		return ""
+	case errors.As(r.Err, &dnsErr):
+		return "host name could not be resolved"
+	case errors.Is(r.Err, syscall.ECONNREFUSED):
+		return "connection refused"
+	case errors.Is(r.Err, context.DeadlineExceeded), isTimeout(r.Err):
+		return "timed out"
+	case errors.Is(r.Err, context.Canceled):
+		return "cancelled"
+	}
+	return "unreachable"
+}
+
+func isTimeout(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 // Probe opens and immediately closes a TCP connection to host:port. Success proves that some
@@ -49,7 +72,13 @@ type Tracker struct {
 
 // NewTracker starts in StatusUnknown.
 func NewTracker(offlineThreshold int) *Tracker {
-	return &Tracker{threshold: max(offlineThreshold, 1), status: devices.StatusUnknown}
+	return NewTrackerFrom(offlineThreshold, devices.StatusUnknown)
+}
+
+// NewTrackerFrom starts in the given status (the one stored for the device), so a restart does not
+// record a spurious transition. The consecutive-failure counter always starts at zero.
+func NewTrackerFrom(offlineThreshold int, status devices.Status) *Tracker {
+	return &Tracker{threshold: max(offlineThreshold, 1), status: status}
 }
 
 // Status returns the current status.

@@ -9,9 +9,13 @@ import (
 	"time"
 
 	"github.com/thanhtunguet/homecore/internal/api/gen"
+	"github.com/thanhtunguet/homecore/internal/audit"
 	"github.com/thanhtunguet/homecore/internal/auth"
+	"github.com/thanhtunguet/homecore/internal/commands"
 	"github.com/thanhtunguet/homecore/internal/config"
+	"github.com/thanhtunguet/homecore/internal/devices"
 	"github.com/thanhtunguet/homecore/internal/httpx"
+	"github.com/thanhtunguet/homecore/internal/monitoring"
 	"github.com/thanhtunguet/homecore/internal/storage"
 	"github.com/thanhtunguet/homecore/internal/version"
 )
@@ -25,6 +29,12 @@ type Handlers struct {
 	Log  *slog.Logger
 	Now  func() time.Time
 	Info InfoSource // what GET /system/info reports; set by the router
+
+	// Device management (Phase 2). Each nil service makes its operations answer 501.
+	Devices  *devices.Service    // device CRUD, history
+	Commands *commands.Engine    // wake, command history, power_transition
+	Monitor  *monitoring.Monitor // probe
+	Audit    *audit.Writer       // audit_log entries for device changes (nil: not written)
 }
 
 var _ gen.ServerInterface = (*Handlers)(nil)

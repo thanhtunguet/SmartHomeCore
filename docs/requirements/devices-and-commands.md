@@ -1,0 +1,79 @@
+# Requirements: Devices, Monitoring, Commands and Retention
+
+| | |
+|---|---|
+| Brief | §3.2 (devices, online monitoring), §3.3 (Wake-on-LAN), §3.4 (commands, "wake many"), §4 (REST API), §6 |
+| Code | `internal/devices` (`device.go`, `validate.go`, `service.go`, `repo.go`, `repo_sqlite.go`), `internal/monitoring` (`monitoring.go`, `monitor.go`), `internal/commands` (`commands.go`, `engine.go`, `wake.go`, `repo.go`, `repo_sqlite.go`), `internal/wol`, `internal/retention`, `internal/page`, `internal/api/handlers/handlers_devices.go`, `handlers_commands.go`, `internal/app/app.go` |
+| Design | [architecture §6.2, §6.3, §6.5, §8, §9](../design/architecture.md), [database.md](../design/database.md) (`devices`, `agent_bindings`, `device_status_history`, `commands`, §5 lifecycle), [ADR-003](../design/decisions.md), [ADR-012](../design/decisions.md#adr-012--idempotent-fail-fast-power-commands-with-a-per-device-throttle), [ADR-014](../design/decisions.md#adr-014--phase-2-decisions-manual-probes-feed-hysteresis-client-side-wake-many-urgent-probing) |
+| Last updated | 2026-11-14 (Phase 2) |
+| Status | **Implemented** for devices, monitoring, wake, command history and retention; the shutdown dispatcher is Phase 3 (`shutdownDevice` still returns `501`) |
+
+Every endpoint response is validated against `api/openapi.yaml` by the test helper in
+`internal/api/conformance_test.go` (`specChecker`, kin-openapi `openapi3filter`, which
+`TestSpecCheckerCatchesDrift` proves is not vacuous). "Verified by" names tests in `internal/api`
+unless a package is given.
+
+## Device registry
+
+| ID | Requirement | Status | Verified by |
+|----|-------------|--------|-------------|
+| REQ-DEV-001 | `POST /devices` creates a device (`201`) with a UUIDv7 id. Required: `name`, `ip_address`, `monitor_port`. Defaults: `monitor_interval_seconds` 30, `monitor_timeout_ms` 2000, `wol_port` 9, `enabled` true, `device_type` `desktop`, `os` `linux`, `status` `unknown`, `power_transition` `none`. | Implemented | `TestDeviceCRUDHappyPath`, `devices.TestCreateAppliesDefaultsAndNormalises` |
+| REQ-DEV-002 | Validation (`400 bad_request`, all problems listed in one message): `name` 1..100 characters after trimming; `description` at most 1000; `hostname` an RFC 1123 name; `ip_address` an IP (canonicalised; zone, unspecified and multicast addresses rejected) or a hostname; `mac_address` six bytes in any common notation (`:`, `-`, dotted, bare hex), stored as `aa:bb:cc:dd:ee:ff`; `wol_broadcast_address` an IPv4 address; ports 1..65535; `monitor_interval_seconds` 5..3600; `monitor_timeout_ms` 100..10000; `device_type` and `os` from the spec enums; agent `port` 1..65535, `scheme` `http`/`https`, `agent_id` a UUID. Unknown JSON fields, trailing data and non-object bodies are rejected. | Implemented | `TestCreateValidation` (21 cases), `TestUpdateValidationAndUnknownFields`, `devices.TestCreateValidation` (about 45 cases), `devices.TestCreateReportsAllProblemsAtOnce` |
+| REQ-DEV-003 | `name` is unique ignoring case; a clash on create or update is `409 conflict`. | Implemented | `TestDuplicateNameIsA409`, `devices.TestNameUniqueIgnoringCase` |
+| REQ-DEV-004 | `GET /devices/{id}`, `PATCH /devices/{id}` (partial; omitted = unchanged), `DELETE /devices/{id}` (`204`, `404` when unknown, including a second delete). An empty `PATCH` body is a no-op that does not change `updated_at`. `status` and the monitoring fields are read-only and never accepted. | Implemented | `TestDeviceCRUDHappyPath`, `TestUnknownDeviceIs404EverywhereAndBadIDIs400`, `devices.TestEmptyUpdateChangesNothing` |
+| REQ-DEV-005 | `PATCH` with `""` clears `description`, `hostname`, `mac_address` and `wol_broadcast_address` (the response omits them); clearing the MAC makes wake `409` again (GAP-API-04). `ip_address`, `name` and the numeric fields cannot be cleared (`400`). | Implemented | `TestPatchClearsOptionalTextWithEmptyString`, `devices.TestUpdateClearsWithEmptyString` |
+| REQ-DEV-006 | Agent binding. `POST`/`PATCH` with an `agent` object stores `agent_id`, `port` (default 9750) and `scheme` (default `http`); `PATCH` replaces the binding. An `agent_id` bound to another device is `409`. `DELETE /devices/{id}/agent` is idempotent: `204` whether or not a binding existed, `404` only for an unknown device. The response omits `agent.status`, `version` and `last_ok_at` until Phase 3 (REQ-API-021). | Implemented | `TestAgentBindingThroughTheAPI`, `devices.TestAgentBindingLifecycle` |
+| REQ-DEV-007 | `GET /devices` lists devices ordered by name (case-insensitive, ties by id) with a keyset cursor: `limit` 1..200 (default 50; `0`, negative or larger is `400`), `next_cursor` present only when more items exist, a malformed or foreign cursor is `400`. | Implemented | `TestListPaginationOverHTTP`, `devices.TestListPagination`, `devices.TestListCursorAcrossNameCaseAndOrderTies`, `devices.TestListBadParameters`, `page.TestCursorRoundTripAndRejection` |
+| REQ-DEV-008 | Deleting a device removes its agent binding, status history and commands (database cascade, also when a command is active) and writes an audit entry; it sends nothing to the machine. | Implemented | `devices.TestDeleteCascadesToBindingHistoryAndCommands`, `TestDeviceChangesAreAudited` |
+| REQ-DEV-009 | `power_transition` (`none`/`waking`/`shutting_down`) is derived from the device's active command in every device response (get, list, create, update), using one query per list, never stored. If both types are active the newer one wins. | Implemented | `TestWakeLifecycleOverHTTP`, `TestCommandListFiltersPaginationAndErrors`, `commands.TestWakeSendsMagicPacketAndIsSent` |
+| REQ-DEV-010 | Device create, update, delete, agent removal and wake write `audit_log` entries with the acting user (`device.create`, `device.update`, `device.delete`, `device.agent_remove`, `device.wake`); only successful requests, no secrets. | Implemented | `TestDeviceChangesAreAudited` |
+| REQ-DEV-011 | Every device operation requires authentication (`401` without or with an invalid token) and is `404` for an unknown id, `400` for a malformed id. | Implemented | `TestEveryImplementedOperationRequiresAuthentication`, `TestUnknownDeviceIs404EverywhereAndBadIDIs400` |
+
+## Monitoring
+
+| ID | Requirement | Status | Verified by |
+|----|-------------|--------|-------------|
+| REQ-MON-001 | A Monitor component (`Run(ctx) error`) checks due devices at start and on every `controller.monitor.tick`. A device is due when its in-memory next time has come; each probe schedules the next at `interval - 10 % + jitter(0..20 %)`. Disabled devices are not probed on schedule. | Implemented | `monitoring.TestOnlyDueDevicesAreProbed`, `monitoring.TestJitterSpreadsNextProbe` |
+| REQ-MON-002 | Probes run through a worker pool bounded by `controller.monitor.concurrency`; one device is never probed twice at once (a tick skips a device still being probed). | Implemented | `monitoring.TestWorkerPoolIsBounded`, `monitoring.TestSameDeviceIsNeverProbedConcurrently` |
+| REQ-MON-003 | Hysteresis: one success makes a device `online`; `controller.monitor.offline_threshold` consecutive failures make it `offline`. The result is persisted per observation: `status`, `last_checked_at`, and on success `last_seen_at` and `last_latency_ms`. A `device_status_history` row (with `reason` `probe` or `manual probe`) is written only on a transition. If persistence fails the in-memory tracker is rolled back. | Implemented | `monitoring.TestHysteresisAndPersistence`, `devices.TestObservationsAndHistory`, `TestProbeAndHistory` |
+| REQ-MON-004 | The tracker is seeded from the stored status after a restart (deviation from the first design, which started at `unknown`). | Implemented | `monitoring.TestTrackerIsSeededFromStoredStatus` |
+| REQ-MON-005 | A device with an active wake/shutdown command is probed on every tick whatever its interval or `enabled` flag, so the command completes within about one tick of the state change. | Implemented | `monitoring.TestDeviceWithActiveCommandIsProbedEveryTickEvenWhenDisabled`, `TestWakeLifecycleOverHTTP`; real Controller smoke test 2026-11-14 |
+| REQ-MON-006 | `POST /devices/{id}/probe` (`200`) probes at once, also a disabled device, and returns the raw `reachable`/`error`/`latency_ms` plus the `status` after hysteresis. A manual probe feeds the same tracker and the stored state (ADR-014) and notifies the commands engine. | Implemented | `TestProbeAndHistory`, `monitoring.TestProbeNowFeedsTheTrackerAndPersists` |
+| REQ-MON-007 | `GET /devices/{id}/history` returns status transitions newest first with a keyset cursor (same `limit`/`cursor` rules as REQ-DEV-007). | Implemented | `TestProbeAndHistory`, `devices.TestObservationsAndHistory` |
+| REQ-MON-008 | The Monitor stops when its context is cancelled, leaks no goroutines, and does not record probes aborted by the cancellation; a deleted device is forgotten; the whole package is race-free. | Implemented | `monitoring.TestRunStopsOnCancelAndLeaksNoGoroutines`, `monitoring.TestShutdownDoesNotRecordAbortedProbes`, `monitoring.TestDeletedDeviceIsForgotten`, `make test-race` |
+| REQ-MON-009 | The Monitor tells an `Observer` (implemented by the commands engine) about every status transition and every observation of a device with an active command. | Implemented | `monitoring.TestObserverSeesTransitions`, `commands.TestMonitorTransitionCompletesWake` |
+
+## Commands and Wake-on-LAN
+
+| ID | Requirement | Status | Verified by |
+|----|-------------|--------|-------------|
+| REQ-CMD-001 | `POST /devices/{id}/wake` returns `202` with a `Command` and never waits for the machine. A device with no MAC address is `409 conflict` and nothing is stored. A wake that sends the packet returns the command `sent` with `deadline_at = now + controller.commands.wake_deadline` and `requested_by` set from the authenticated user. | Implemented | `TestWakeLifecycleOverHTTP`, `TestWakeWithoutMACIs409`, `commands.TestWakeSendsMagicPacketAndIsSent`, `commands.TestWakeWithoutMACIsAPreconditionFailure` |
+| REQ-CMD-002 | The magic packet (6 × `0xFF` + 16 × MAC) is sent through `internal/wol` to the device's `wol_broadcast_address` or the resolved directed broadcast, on `wol_port`. | Implemented | `commands.TestWakeDispatcherSendsARealMagicPacket`, `wol.TestMagicPacketLayout`, `TestWakeLifecycleOverHTTP` (address and port) |
+| REQ-CMD-003 | Idempotent (ADR-012): while a wake is active a repeated request returns the same command and sends no new packet. The database enforces it (`commands_one_active`), so concurrent requests converge on one command. | Implemented | `TestWakeLifecycleOverHTTP`, `commands.TestWakeIsIdempotent`, `commands.TestConcurrentWakesCollapseIntoOneCommand`, `commands.TestDatabaseEnforcesOneActiveCommand` |
+| REQ-CMD-004 | A wake of a device whose status is `online` is created `completed` with no packet. A stored `online` is confirmed by one fresh probe first (the status may be stale); an `offline` or `unknown` device is not probed before sending. | Implemented | `TestWakeLifecycleOverHTTP`, `commands.TestWakeOfOnlineDeviceCompletesImmediately`, `commands.TestStaleOnlineStatusIsConfirmedByAFreshProbe`, `commands.TestOfflineAndUnknownDevicesAreNotProbedBeforeSending` |
+| REQ-CMD-005 | Fail fast: a send error makes the command `failed` at once with `error_code` `wol_send_failed` and a message; the request is still `202`. | Implemented | `TestWakeSendFailureYieldsAFailedCommand`, `commands.TestSendFailureFailsTheCommandAtOnce` |
+| REQ-CMD-006 | A `sent` wake becomes `completed` when the Monitor observes the device `online`, and `timed_out` when `deadline_at` passes first (a job sweeps every 5 s). | Implemented | `TestWakeLifecycleOverHTTP`, `TestWakeTimesOutAtItsDeadline`, `commands.TestMonitorTransitionCompletesWake`, `commands.TestDeadlineTimesOutSentCommands`; real Controller smoke test 2026-11-14 |
+| REQ-CMD-007 | State changes are compare-and-set and validated by the state machine (architecture §8.2). The engine is type-generic: a `Dispatcher` per type is registered by `internal/app`; Phase 3 adds the shutdown one without engine changes. | Implemented | `commands.TestTransitions`, `commands.TestEngineIsGenericAcrossTypes` |
+| REQ-CMD-008 | Restart recovery: at start, active commands past their deadline are expired (`sent` → `timed_out`, `pending` → `failed` with `error_code` `interrupted`); `pending` commands within their deadline are dispatched again with the same id; `sent` commands continue and are completed or timed out normally. | Implemented | `commands.TestRecoveryAfterRestart`; real Controller smoke test 2026-11-14 (`kill -9`, restart: still `sent`, then `timed_out`) |
+| REQ-CMD-009 | `GET /commands` lists commands newest first (keyset on `created_at`, `id`), with `device_id` and `status` filters, `limit` 1..200 (default 50) and `next_cursor` only when more exist; a bad status, limit, cursor or device id is `400`. `GET /commands/{id}` is `404` when unknown. | Implemented | `TestCommandListFiltersPaginationAndErrors`, `commands.TestListFiltersAndPagination` |
+| REQ-CMD-010 | The per-device throttle answers a second wake/shutdown within one second with `429 rate_limited` and `Retry-After`, before the handler runs (REQ-API-018). | Implemented | `TestWakeLifecycleOverHTTP` (429, `Retry-After: 1`, no extra packet) |
+| REQ-CMD-011 | `POST /devices/{id}/shutdown` keeps answering `501 not_implemented`; the shutdown dispatcher, controller key management and `audit_log` for shutdown are Phase 3. | Planned (Phase 3) | `TestShutdownIsStillNotImplemented` |
+| REQ-CMD-012 | "Wake many" (brief §3.4) is **client-side fan-out**: the UI calls `wakeDevice` once per selected device. There is no batch endpoint (ADR-014). | Changed (decision) | n/a: no code |
+
+## Retention
+
+| ID | Requirement | Status | Verified by |
+|----|-------------|--------|-------------|
+| REQ-RET-001 | A retention job (`Run(ctx)`) prunes, at start and then hourly, rows older than `controller.retention_days`: terminal commands (by `updated_at`), `device_status_history` and `ddns_sync_history`. Deletes are batched (500 rows per statement). Active commands are never pruned. `retention_days: 0` disables pruning. A failing table does not stop the others. | Implemented | `retention.TestPrunesOldRowsInBatchesAndKeepsRecentAndActiveOnes`, `retention.TestRunDisabledAndStopsOnCancel`, `retention.TestPruneErrorStopsThatTargetOnly`, `commands.TestPruneTerminalKeepsActiveCommands`, `devices.TestPruneHistory`. The `ddns_sync_history` SQL has no test of its own (the table is empty until Phase 4) |
+| REQ-RET-002 | `audit_log` is not pruned. | Implemented | n/a |
+
+## Known gaps
+
+- `agent.status`, `agent.version` and `agent.last_ok_at` are absent until the Phase 3 dispatcher exists.
+- Shutdown: no dispatcher, no controller key endpoint, no `device.shutdown` audit entry (Phase 3).
+- The monitor's failure counters are in memory: after a restart an `online` device needs `offline_threshold` fresh failures to go `offline` (the stored status itself survives).
+- `monitor_interval_seconds` has a 5 s floor and the tick defaults to 5 s, so a device is never probed more often than the tick; an active command is probed every tick.
+- Hostname-based probing is implemented (`hostname` wins over `ip_address`) but not exercised against a real DNS name in tests.
+- The retention SQL for `ddns_sync_history` is untested until Phase 4 fills the table.
+- Wake of a device with a broadcast address that is not on a reachable subnet succeeds as `sent` and then `timed_out`: UDP gives no delivery feedback.
+- No `total` count on lists, by design.

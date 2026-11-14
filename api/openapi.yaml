@@ -153,6 +153,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/DeviceList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
     post:
       tags: [devices]
@@ -206,6 +207,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
     delete:
       tags: [devices]
       operationId: deleteDevice
@@ -325,6 +327,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/StatusHistory" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -348,6 +351,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CommandList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/commands/{id}:
@@ -959,7 +963,7 @@ components:
         id: { type: string, format: uuid }
         name: { type: string }
         zone_id: { type: string }
-        record_id: { type: string, description: Cloudflare record id, chosen from the record lookup when the configuration was created. }
+        record_id: { type: string, description: "Cloudflare record id, chosen from the record lookup when the configuration was created." }
         record_name: { type: string, example: home.example.com }
         record_type: { $ref: "#/components/schemas/DnsRecordType" }
         proxied: { type: boolean }
@@ -970,7 +974,7 @@ components:
         last_ip: { type: string, description: Address the Controller last pushed to Cloudflare. }
         detected_ip: { type: string, description: Public address found by the most recent discovery run. }
         dns_value: { type: string, description: Content of the Cloudflare record as last read. }
-        last_checked_at: { type: string, format: date-time, description: Last discovery/comparison run, whether or not it changed the record. }
+        last_checked_at: { type: string, format: date-time, description: "Last discovery/comparison run, whether or not it changed the record." }
         last_synced_at: { type: string, format: date-time }
         last_error: { type: string }
         last_error_at: { type: string, format: date-time }
