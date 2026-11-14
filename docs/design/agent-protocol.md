@@ -89,10 +89,11 @@ Error:
 
 ## 5. Controller behaviour
 
-1. Build a body with a fresh nonce and `issued_at = now`, sign, POST with a 5 s timeout.
+1. Build a body with a fresh nonce and `issued_at = now`, sign, POST with a 2 s timeout (LAN; fail fast, ADR-012).
 2. `202`/`200` → command `acknowledged`; then wait for the monitor to report `offline`.
-3. Network error / 5xx → retry up to 3 times with backoff, **same `command_id`, new nonce and
-   `issued_at`** (idempotent by step 10).
+3. Network error / 5xx → at most **one** immediate retry, **same `command_id`, new nonce and
+   `issued_at`** (idempotent by step 10), then the command is `failed`. No backoff loop: the user
+   can simply press the button again.
 4. 4xx → command `failed` with the agent's `error.code`.
 
 ## 6. Other Agent endpoints

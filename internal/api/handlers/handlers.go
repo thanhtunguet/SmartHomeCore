@@ -62,10 +62,10 @@ func (h *Handlers) GetReadyz(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if ready {
-		httpx.WriteJSON(w, http.StatusOK, gen.Readiness{Status: gen.Ready, Checks: checks})
+		httpx.WriteJSON(w, http.StatusOK, gen.Readiness{Status: gen.ReadinessStatusReady, Checks: checks})
 		return
 	}
-	httpx.WriteJSON(w, http.StatusServiceUnavailable, gen.Readiness{Status: gen.NotReady, Checks: checks})
+	httpx.WriteJSON(w, http.StatusServiceUnavailable, gen.Readiness{Status: gen.ReadinessStatusNotReady, Checks: checks})
 }
 
 // InfoSource is the configuration GET /system/info reports. It is a copy of non-secret settings.

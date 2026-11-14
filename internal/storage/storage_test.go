@@ -98,3 +98,20 @@ func TestDeviceMetaColumnsDefaultAndConstrain(t *testing.T) {
 		t.Fatal("invalid os accepted")
 	}
 }
+
+// ADR-011: accounts have no role; a user row needs only credentials.
+func TestUsersHaveNoRoleColumn(t *testing.T) {
+	ctx := context.Background()
+	db := openTemp(t)
+	if _, err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO users (id, username, password_hash, created_at, updated_at)
+		VALUES ('u1', 'alice', 'hash', 0, 0)`); err != nil {
+		t.Fatalf("insert without role: %v", err)
+	}
+	var n int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('users') WHERE name='role'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("role column still present (n=%d, err=%v)", n, err)
+	}
+}

@@ -25,7 +25,8 @@ engines, message brokers, Redis, ORMs, DI frameworks, or new heavy dependencies 
 
 - **Spec-first API.** Change `api/openapi.yaml` first, run `make generate`, then implement on
   `internal/api/handlers.Handlers`. Never edit `internal/api/gen/*.gen.go`. Auth rules come from
-  each operation's `security` (`bearerAuth: [admin]` = admin only, `security: []` = public).
+  each operation's `security` (`bearerAuth: []` = any authenticated user, `security: []` = public;
+  there are no roles, ADR-011, so scopes on `bearerAuth` abort startup).
 - **Migrations are append-only**: new file `internal/storage/migrations/NNNN_name.sql`; STRICT
   tables; timestamps INTEGER unix ms; IDs TEXT UUIDv7.
 - **Dependency direction**: handlers → domain packages → storage. Domain packages define their own
@@ -44,7 +45,9 @@ engines, message brokers, Redis, ORMs, DI frameworks, or new heavy dependencies 
   idempotency.
 - No plaintext secrets in the DB (seal with `internal/secrets`), none in API responses or logs.
 - JWT signing key, Controller Ed25519 key and master key are distinct.
-- Shutdown requires the `admin` role and writes `audit_log`.
+- Every `/api/v1` operation except the public ones requires authentication; there are no roles
+  (ADR-011). Shutdown writes `audit_log` with the acting user.
+- Wake/shutdown are idempotent and limited to one request per device per second (ADR-012).
 - Wake/shutdown endpoints return `202` + command; never block until the machine changes state.
 
 ## Documentation rules

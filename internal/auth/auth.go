@@ -1,10 +1,11 @@
 // Package auth handles users, password hashing, JWT access tokens, rotating refresh tokens and
-// role-based authorization for the Controller REST API.
+// authentication for the Controller REST API. There are no roles: every authenticated user is
+// equal (ADR-011).
 //
 // TODO(phase-1/2): argon2id password hashing, HS256 JWT issuing/verification with a dedicated
 // signing key (sealed in system_settings, distinct from agent keys), refresh token rotation with
-// family-based reuse detection, first-run admin bootstrap (HOMECORE_ADMIN_PASSWORD or a random
-// password logged once), and the login/refresh/logout/me handlers.
+// family-based reuse detection, account management by the `homecore user` command (add, change
+// password; there is no first-run bootstrap), and the login/refresh/logout/me handlers.
 package auth
 
 import (
@@ -12,23 +13,11 @@ import (
 	"errors"
 )
 
-// Role is a coarse permission level.
-type Role string
-
-const (
-	RoleAdmin  Role = "admin"
-	RoleViewer Role = "viewer"
-)
-
 // Principal is the authenticated caller of an API request.
 type Principal struct {
 	UserID   string
 	Username string
-	Role     Role
 }
-
-// HasRole reports whether p satisfies role r. Admin satisfies every role.
-func (p Principal) HasRole(r Role) bool { return p.Role == RoleAdmin || p.Role == r }
 
 // ErrUnauthenticated is returned when a token is missing, malformed, expired or revoked.
 var ErrUnauthenticated = errors.New("unauthenticated")

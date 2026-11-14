@@ -39,6 +39,27 @@ func (e AgentBindingScheme) Valid() bool {
 	}
 }
 
+// Defines values for AgentBindingStatus.
+const (
+	AgentBindingStatusReady       AgentBindingStatus = "ready"
+	AgentBindingStatusUnknown     AgentBindingStatus = "unknown"
+	AgentBindingStatusUnreachable AgentBindingStatus = "unreachable"
+)
+
+// Valid indicates whether the value is a known member of the AgentBindingStatus enum.
+func (e AgentBindingStatus) Valid() bool {
+	switch e {
+	case AgentBindingStatusReady:
+		return true
+	case AgentBindingStatusUnknown:
+		return true
+	case AgentBindingStatusUnreachable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CommandStatus.
 const (
 	CommandStatusAcknowledged CommandStatus = "acknowledged"
@@ -125,19 +146,19 @@ func (e DdnsSyncResultResult) Valid() bool {
 
 // Defines values for DeviceStatus.
 const (
-	Offline DeviceStatus = "offline"
-	Online  DeviceStatus = "online"
-	Unknown DeviceStatus = "unknown"
+	DeviceStatusOffline DeviceStatus = "offline"
+	DeviceStatusOnline  DeviceStatus = "online"
+	DeviceStatusUnknown DeviceStatus = "unknown"
 )
 
 // Valid indicates whether the value is a known member of the DeviceStatus enum.
 func (e DeviceStatus) Valid() bool {
 	switch e {
-	case Offline:
+	case DeviceStatusOffline:
 		return true
-	case Online:
+	case DeviceStatusOnline:
 		return true
-	case Unknown:
+	case DeviceStatusUnknown:
 		return true
 	default:
 		return false
@@ -248,34 +269,16 @@ func (e PowerTransition) Valid() bool {
 
 // Defines values for ReadinessStatus.
 const (
-	NotReady ReadinessStatus = "not_ready"
-	Ready    ReadinessStatus = "ready"
+	ReadinessStatusNotReady ReadinessStatus = "not_ready"
+	ReadinessStatusReady    ReadinessStatus = "ready"
 )
 
 // Valid indicates whether the value is a known member of the ReadinessStatus enum.
 func (e ReadinessStatus) Valid() bool {
 	switch e {
-	case NotReady:
+	case ReadinessStatusNotReady:
 		return true
-	case Ready:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for Role.
-const (
-	Admin  Role = "admin"
-	Viewer Role = "viewer"
-)
-
-// Valid indicates whether the value is a known member of the Role enum.
-func (e Role) Valid() bool {
-	switch e {
-	case Admin:
-		return true
-	case Viewer:
+	case ReadinessStatusReady:
 		return true
 	default:
 		return false
@@ -305,13 +308,72 @@ func (e SystemInfoMode) Valid() bool {
 
 // AgentBinding defines model for AgentBinding.
 type AgentBinding struct {
-	AgentId openapi_types.UUID  `json:"agent_id"`
-	Port    int                 `json:"port"`
-	Scheme  *AgentBindingScheme `json:"scheme,omitempty"`
+	AgentId openapi_types.UUID `json:"agent_id"`
+
+	// LastOkAt Last successful contact with the agent.
+	LastOkAt *time.Time          `json:"last_ok_at,omitempty"`
+	Port     int                 `json:"port"`
+	Scheme   *AgentBindingScheme `json:"scheme,omitempty"`
+
+	// Status Reachability of the agent as seen by the Controller's dispatcher: `ready` (last contact
+	// succeeded), `unreachable` (last contact failed) or `unknown` (never contacted). Absent
+	// until the dispatcher reports it; clients must then treat it as `unknown`.
+	Status *AgentBindingStatus `json:"status,omitempty"`
+
+	// Version Agent version reported on the last successful contact.
+	Version *string `json:"version,omitempty"`
 }
 
 // AgentBindingScheme defines model for AgentBinding.Scheme.
 type AgentBindingScheme string
+
+// AgentBindingStatus Reachability of the agent as seen by the Controller's dispatcher: `ready` (last contact
+// succeeded), `unreachable` (last contact failed) or `unknown` (never contacted). Absent
+// until the dispatcher reports it; clients must then treat it as `unknown`.
+type AgentBindingStatus string
+
+// CloudflareLookup Credentials for a Cloudflare lookup: give **exactly one** of `api_token` (a token the user is
+// typing into the form, not yet saved) or `config_id` (reuse the sealed token of an existing
+// DDNS configuration). Neither or both: `400`.
+type CloudflareLookup struct {
+	ApiToken *string             `json:"api_token,omitempty"`
+	ConfigId *openapi_types.UUID `json:"config_id,omitempty"`
+}
+
+// CloudflareRecord defines model for CloudflareRecord.
+type CloudflareRecord struct {
+	// Content Current value (an IP address).
+	Content string `json:"content"`
+	Id      string `json:"id"`
+
+	// Name Example: home.example.com
+	Name    string `json:"name"`
+	Proxied bool   `json:"proxied"`
+
+	// Ttl 1 = automatic
+	Ttl  int           `json:"ttl"`
+	Type DnsRecordType `json:"type"`
+}
+
+// CloudflareRecordList defines model for CloudflareRecordList.
+type CloudflareRecordList struct {
+	// Items `A` and `AAAA` records of the zone, ordered by `name`.
+	Items []CloudflareRecord `json:"items"`
+}
+
+// CloudflareZone defines model for CloudflareZone.
+type CloudflareZone struct {
+	Id string `json:"id"`
+
+	// Name Example: example.com
+	Name string `json:"name"`
+}
+
+// CloudflareZoneList defines model for CloudflareZoneList.
+type CloudflareZoneList struct {
+	// Items Zones the token can see, ordered by `name`.
+	Items []CloudflareZone `json:"items"`
+}
 
 // Command Asynchronous wake or shutdown. Terminal statuses: `completed`, `failed`, `timed_out`.
 //
@@ -397,6 +459,9 @@ type DdnsConfig struct {
 	Name         string     `json:"name"`
 	Proxied      bool       `json:"proxied"`
 
+	// RecordId Cloudflare record id
+	RecordId string `json:"record_id"`
+
 	// RecordName Example: home.example.com
 	RecordName string        `json:"record_name"`
 	RecordType DnsRecordType `json:"record_type"`
@@ -410,28 +475,34 @@ type DdnsConfig struct {
 // DdnsConfigCreate defines model for DdnsConfigCreate.
 type DdnsConfigCreate struct {
 	// ApiToken Cloudflare API token scoped to Zone:DNS:Edit
-	ApiToken        *string       `json:"api_token,omitempty"`
-	Enabled         *bool         `json:"enabled,omitempty"`
-	IntervalSeconds *int          `json:"interval_seconds,omitempty"`
-	Name            string        `json:"name"`
-	Proxied         *bool         `json:"proxied,omitempty"`
-	RecordName      string        `json:"record_name"`
-	RecordType      DnsRecordType `json:"record_type"`
-	Ttl             *int          `json:"ttl,omitempty"`
-	ZoneId          string        `json:"zone_id"`
+	ApiToken        *string `json:"api_token,omitempty"`
+	Enabled         *bool   `json:"enabled,omitempty"`
+	IntervalSeconds *int    `json:"interval_seconds,omitempty"`
+	Name            string  `json:"name"`
+	Proxied         *bool   `json:"proxied,omitempty"`
+
+	// RecordId Record picked with `listCloudflareRecords`. `record_name`, `record_type`, `proxied` and `ttl` are copied from that record by the client; the Controller does not look records up by name.
+	RecordId   string        `json:"record_id"`
+	RecordName string        `json:"record_name"`
+	RecordType DnsRecordType `json:"record_type"`
+	Ttl        *int          `json:"ttl,omitempty"`
+	ZoneId     string        `json:"zone_id"`
 }
 
 // DdnsConfigUpdate defines model for DdnsConfigUpdate.
 type DdnsConfigUpdate struct {
-	ApiToken        *string        `json:"api_token,omitempty"`
-	Enabled         *bool          `json:"enabled,omitempty"`
-	IntervalSeconds *int           `json:"interval_seconds,omitempty"`
-	Name            *string        `json:"name,omitempty"`
-	Proxied         *bool          `json:"proxied,omitempty"`
-	RecordName      *string        `json:"record_name,omitempty"`
-	RecordType      *DnsRecordType `json:"record_type,omitempty"`
-	Ttl             *int           `json:"ttl,omitempty"`
-	ZoneId          *string        `json:"zone_id,omitempty"`
+	ApiToken        *string `json:"api_token,omitempty"`
+	Enabled         *bool   `json:"enabled,omitempty"`
+	IntervalSeconds *int    `json:"interval_seconds,omitempty"`
+	Name            *string `json:"name,omitempty"`
+	Proxied         *bool   `json:"proxied,omitempty"`
+
+	// RecordId Required together with `zone_id` and `record_name` when the target record changes; changing `zone_id` without `record_id` is `400`.
+	RecordId   *string        `json:"record_id,omitempty"`
+	RecordName *string        `json:"record_name,omitempty"`
+	RecordType *DnsRecordType `json:"record_type,omitempty"`
+	Ttl        *int           `json:"ttl,omitempty"`
+	ZoneId     *string        `json:"zone_id,omitempty"`
 }
 
 // DdnsSyncResult defines model for DdnsSyncResult.
@@ -601,9 +672,6 @@ type RefreshRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
-// Role defines model for Role.
-type Role string
-
 // StatusChange defines model for StatusChange.
 type StatusChange struct {
 	ChangedAt time.Time `json:"changed_at"`
@@ -703,7 +771,6 @@ type TokenPair struct {
 // User defines model for User.
 type User struct {
 	Id       openapi_types.UUID `json:"id"`
-	Role     Role               `json:"role"`
 	Username string             `json:"username"`
 }
 
@@ -719,14 +786,14 @@ type DeviceId = openapi_types.UUID
 // Limit defines model for Limit.
 type Limit = int
 
+// BadGateway defines model for BadGateway.
+type BadGateway = Error
+
 // BadRequest defines model for BadRequest.
 type BadRequest = Error
 
 // Conflict defines model for Conflict.
 type Conflict = Error
-
-// Forbidden defines model for Forbidden.
-type Forbidden = Error
 
 // NotFound defines model for NotFound.
 type NotFound = Error
@@ -775,6 +842,12 @@ type RefreshTokenJSONRequestBody = RefreshRequest
 // CreateDdnsConfigJSONRequestBody defines body for CreateDdnsConfig for application/json ContentType.
 type CreateDdnsConfigJSONRequestBody = DdnsConfigCreate
 
+// ListCloudflareZonesJSONRequestBody defines body for ListCloudflareZones for application/json ContentType.
+type ListCloudflareZonesJSONRequestBody = CloudflareLookup
+
+// ListCloudflareRecordsJSONRequestBody defines body for ListCloudflareRecords for application/json ContentType.
+type ListCloudflareRecordsJSONRequestBody = CloudflareLookup
+
 // UpdateDdnsConfigJSONRequestBody defines body for UpdateDdnsConfig for application/json ContentType.
 type UpdateDdnsConfigJSONRequestBody = DdnsConfigUpdate
 
@@ -810,6 +883,12 @@ type ServerInterface interface {
 	// CreateDdnsConfig Add a DDNS configuration
 	// (POST /api/v1/ddns)
 	CreateDdnsConfig(w http.ResponseWriter, r *http.Request)
+	// ListCloudflareZones List the Cloudflare zones a token can see
+	// (POST /api/v1/ddns/cloudflare/zones)
+	ListCloudflareZones(w http.ResponseWriter, r *http.Request)
+	// ListCloudflareRecords List the A/AAAA records of a Cloudflare zone
+	// (POST /api/v1/ddns/cloudflare/zones/{zone_id}/records)
+	ListCloudflareRecords(w http.ResponseWriter, r *http.Request, zoneId string)
 	// DeleteDdnsConfig Delete a DDNS configuration
 	// (DELETE /api/v1/ddns/{id})
 	DeleteDdnsConfig(w http.ResponseWriter, r *http.Request, id DdnsId)
@@ -843,10 +922,10 @@ type ServerInterface interface {
 	// ProbeDevice Run a TCP probe now
 	// (POST /api/v1/devices/{id}/probe)
 	ProbeDevice(w http.ResponseWriter, r *http.Request, id DeviceId)
-	// ShutdownDevice Request a signed shutdown via the device's agent (asynchronous)
+	// ShutdownDevice Request a signed shutdown via the device's agent (asynchronous, idempotent)
 	// (POST /api/v1/devices/{id}/shutdown)
 	ShutdownDevice(w http.ResponseWriter, r *http.Request, id DeviceId)
-	// WakeDevice Send Wake-on-LAN (asynchronous)
+	// WakeDevice Send Wake-on-LAN (asynchronous, idempotent)
 	// (POST /api/v1/devices/{id}/wake)
 	WakeDevice(w http.ResponseWriter, r *http.Request, id DeviceId)
 	// GetControllerKey Public signing key to paste into an agent's trusted_controllers
@@ -918,6 +997,18 @@ func (_ Unimplemented) CreateDdnsConfig(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListCloudflareZones List the Cloudflare zones a token can see
+// (POST /api/v1/ddns/cloudflare/zones)
+func (_ Unimplemented) ListCloudflareZones(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListCloudflareRecords List the A/AAAA records of a Cloudflare zone
+// (POST /api/v1/ddns/cloudflare/zones/{zone_id}/records)
+func (_ Unimplemented) ListCloudflareRecords(w http.ResponseWriter, r *http.Request, zoneId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // DeleteDdnsConfig Delete a DDNS configuration
 // (DELETE /api/v1/ddns/{id})
 func (_ Unimplemented) DeleteDdnsConfig(w http.ResponseWriter, r *http.Request, id DdnsId) {
@@ -984,13 +1075,13 @@ func (_ Unimplemented) ProbeDevice(w http.ResponseWriter, r *http.Request, id De
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// ShutdownDevice Request a signed shutdown via the device's agent (asynchronous)
+// ShutdownDevice Request a signed shutdown via the device's agent (asynchronous, idempotent)
 // (POST /api/v1/devices/{id}/shutdown)
 func (_ Unimplemented) ShutdownDevice(w http.ResponseWriter, r *http.Request, id DeviceId) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// WakeDevice Send Wake-on-LAN (asynchronous)
+// WakeDevice Send Wake-on-LAN (asynchronous, idempotent)
 // (POST /api/v1/devices/{id}/wake)
 func (_ Unimplemented) WakeDevice(w http.ResponseWriter, r *http.Request, id DeviceId) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -1208,6 +1299,46 @@ func (siw *ServerInterfaceWrapper) CreateDdnsConfig(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateDdnsConfig(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCloudflareZones operation middleware
+func (siw *ServerInterfaceWrapper) ListCloudflareZones(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCloudflareZones(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCloudflareRecords operation middleware
+func (siw *ServerInterfaceWrapper) ListCloudflareRecords(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "zone_id" -------------
+	var zoneId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "zone_id", chi.URLParam(r, "zone_id"), &zoneId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "zone_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCloudflareRecords(w, r, zoneId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1845,6 +1976,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/ddns", wrapper.CreateDdnsConfig)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/ddns/cloudflare/zones", wrapper.ListCloudflareZones)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/ddns/cloudflare/zones/{zone_id}/records", wrapper.ListCloudflareRecords)
+	})
+	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/api/v1/ddns/{id}", wrapper.DeleteDdnsConfig)
 	})
 	r.Group(func(r chi.Router) {
@@ -1862,104 +1999,125 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"5H3bchs5suCvIGo3YiRFiaJky9tNxz6oZU+3z3HbDku9HbFNBwusSpIYVQE1AEo0x9brfsB+4n7JRuJS",
+	"FxK8yZLcPefBYZHENZF3ZCa+RKkoSsGBaxUNvkQllbQADdJ8uqykEhL/ykClkpWaCR4Novcl/WcFJDU/",
+	"Ewm6khwyQhVJOHzWI/tDQsYLomdASgm3TFSKlHQKvSiOGA7yzwrkIoojTguIBpHtE8WRSmdQUJxUL0r8",
+	"RWnJ+DS6u4ujVxlXbzL8zQxRUj1rRmBZFEcS/lkxCVk00LKC9mgTIQuqo0FUVaZlYHS4ZSk83vhvWcF0",
+	"PfjS/nPzY3vADCa0ynU0OO/HUUE/s6IqosFZHz8xbj+d1vMwrmEKMrrDmSSoUnAF5hR/otnPVMOcLvBT",
+	"KrgGbpZByzJnKcVDPfmHwpP90pr+v0uYRIPov500GHJif1Unr6UUbqouZlzmosomOZVAJPwDUg0ZEZJM",
+	"KMshM8iAAASlyUEqMiBJWncYAQ6aHL4kifmrV4BSdAoJSamUDBRpBv+bIhKoErwX3cW4wY921Mff4Bt+",
+	"S3OW+W3g9JeCT3KWPsHkfiYyZ3qG5CeBa6I01YALeSf030XFs8dfyDuhycRMdRdH10L8SvnCHYF6/Nk/",
+	"Ug3E0AtkHo8k1TBy3yEOSdByQehEgzRol3zEL44v8IuEzIBmIMmBglTwTB0iU7LfmeW32q4yvyvbh2hB",
+	"5pRpMoaJMOiu5YLxaS/EwlrEeRdHv3Fa6ZmQ7F/wBGf1K1OK8SmSIXPIm0rIgGtGc2UYkxsDp7iYAtc/",
+	"MZ4h00KBIEUJUjPLSij+OmLZDvwujnKq9EjcjKheBeJbqjRRVZqCUpMqJwgC6hEbz8vMhLCsp8mohmPN",
+	"CjBcmGbveb7wXHhl7lJI3eGhP/6PDhd9cX7+7HwzH3Vggc4w0UzrMooj4NjrD/8R/1PRp8BCkDgrtQqA",
+	"j0DTGR2znOkFEZNmzyhFFQD3wvNScC1FnoP8myIZUyXV6QzkgCQIhEVCDhDOHoBDboAKGWSHMUkqLu08",
+	"OSw1dCz5ENEiqfgNF3OekAMOtyB9G8gOe+RirIDrIa+4ZrlZUbMIIgEBrQjTL0maM0RIUlRKYztOtASq",
+	"CTNbqufoDXkLfmYPURy1Fmo+mbYI0K0nfQtSMcFXIWwwmbif3UpRGnGziTyMgL3tyHXXVgL+aEjCIV2D",
+	"BGKMAtBIiFpwvRXipipXF3vZUCSZCEloS9iR3HQakCm7BXJ0BJ9pqvMFERyOjhB3ElqykRY3gCdIifnL",
+	"bLJSIAlTQ64XJbIAxrUwPyBRxYQLTRagiaK3HhNSwSdsOmJZQg4kVApMcwXUiG8zsJgQygl8ZkozPh3y",
+	"V6/eXRHbr5KGcx32yDtgGhFESDIWejYgyfN+3539Ekvxa+/wlJIqNRdyla/E0VwyDc353MVRvejd1LAN",
+	"x/MRUpx0he+1OPTSuTkZfEvzCsgB5eTNB0KzTIKyUmUFX+0qV762WuCXCD7Toszxt5kooOc+9lJRhAYr",
+	"pfjMoD3iWIgcKMcftc5XF3xK/iehlRYF1SyNQlzPfrNZ2LziyoLqGhsvk4SBu9mQGy2uAdgs2a7v0w7H",
+	"8ZYpvXokTEMR4KvJRUIoz0hycXFxkRBpRlCew/5LcIiJkBlIyJDDJrjMxNgkfrxN+17BlAadqJR0sQoK",
+	"M+rmXf5vwSGwv13xZCOKrD2Z7UvaC+zYQRkQWyaRUo5S7GFgbQD0DZAWRUF5trroC7Xg6UwKjrbpnN4A",
+	"sis1q3Qm5rxHrkEWjNOcWBkOaoD8EWGNOmZMEitC8S9US7KRqDSyuCH/6rqQr3bYr/Wo5OuQfz0+Pq7/",
+	"YeOkBKNvJeQrqmYUxVTrL9NEAdf4e0GnLCUlTW+QcSPr+UoUm6L57S2rDHJ2a4DuuL0RUX9Tni+5EWmK",
+	"QjaHbAoZjozSoFJmaqeIcDU3wyRn/bPkJDnr9xPXtwEDLklwphFydG6my4wZTQTPGYcNv08mtoEZ0cGS",
+	"fPV7S0WVZ2ZRY/Ab9ZqHtyeFbPbX2JtMkwNrQo7QNkgO3RTNIZGvJMmAZjj/iOqEoLiBLPZLw1mNDlbv",
+	"YcfmzZZW5FwNMqcPB/XaFXJ3SLBXn9ZS9+mEW9lVtTfQXSWoX6qC8mPUn1CRM6dUSSAaPuve2mHMIa2O",
+	"9StNZ4zD6mjW8I9JKcGgxRxVzcQSXEKYqnGpR/4XSmXVOKisSj3kFmEOkqpliCEZj2k2clSEH+dS8OnI",
+	"NMaPNMWljbjQI5rnYm77pLlIb0bqBuZJPOS4jhzwewllThdm1EotkkOCmpxFHKJnUlTT2cslBZ8UdIFE",
+	"SphWRMx5TJTwavWQW71a5CDR/HUqslU8lBF5E5rnZEzTG6R7SwBO41qjhGw9ZgcLyEbjxU4dGmtnI2e3",
+	"DPnKNt5R5XCdrMIRR1WZ7UkYIVHYYH2tqbgtdEivM90GEbNFZO4m9uxQq/Iujlq+1bB7dC95eFWflTfG",
+	"nBhCIFhdrS0iorhhYWiWGxpDsHmuGjR/26fWmgmlIk7jpOKarp4u/hMWq1Cl+VRIpmdFe1zIzs7PT38M",
+	"jncDC8feGt3p2eRH2k9Ps7PxczifvOgHdexqnLN0dAOLVSZ1pSnPqMzImCp48dyrmc/OjscLDcR2Jdh1",
+	"Gzq61cWtfXWmDh0kesMvje0TsFjuJTi0kaAjFrBQP9i9eB3CeP+8j6IQCuVvilw1YyoVtyAXRFY8yPUz",
+	"rkaGbQXMKWsmeDh2vMmob6MnwVjuKBWCgwNHYbHGIppRNerYm93Zr2v1lWkF+QSFiXWIeAnSmrI17I7c",
+	"lHEN8pbmI+d1DPkHndcsnUF6U59ewHVWQ9mwECqZEhwBvs5htmJEz8Db51wYH006o3xa++gR2L1owKs8",
+	"92uqZX7Y0Wdl+T7oZrqFUO3C4diSdDQHX1ZqZjXbBjl6a0dHBX9PIvAG1n62toWY4y/pTCjgZCJF0QKn",
+	"c+NYfQW/7vhMyJwqr/I7wG+8WzEjrpPaZi338yi4zvdwAtzb4bC/KI8jNORHQRN5gy/Cd2ofVxdc3f0v",
+	"OysCJNwwnGXusp8C0bDyS9MrIO/W860WYlx8eONYmEpFaQkFzefBq3dXg9eZuWHc7lBrMdHa893xhbaZ",
+	"X4Cr1Z2e9dtO9x9ePO9cXr7oh9DB421BP78FPtWzaHDqutWfN7vC6uknNFfBRXfIddkxjz+RkiEDtvcR",
+	"Sc6UXnb9qKSHSn6NO0lcf8T58KNbknNIaZ0nxghIRckg8+yBak/NTphahX/FNsgEKMOrkY3Ufq2qxG44",
+	"fy/aCqIlxtAC8Nn5s117fxtncAdzugErglcxLXrfuMwl6r834TfUtplafzNkvYVa9yK43SjsyWlqTxqy",
+	"R0C0mFo9w9KROwdHEG3iaaSipnIKNU1YrUS9tH/gHUYzCI4pKl0PxDJr/pubhr8ANTwaBQTx9WrB04+g",
+	"DPkFrjd2vkBpOX9WfmFl8GtZT+vtNCcNzVWfUzwbmzJ4jbqvIrfECJod1stpDxokcuMbWHMHvu3MO9fo",
+	"9/bjtWjqy1qX3U4oaJp6/NtsIwml1+rAu1o65cjZievtha6Js4fFkFMNPF2MQtcQl4JzSDXBAbwR2TZO",
+	"Wxe+pRRjeEmoud4m9nZbcCD1/XkvqKyaJSgAvtfCC5q2IdKo5JQOxuNBmg6ybAAwmEyCva0DfbSbAelb",
+	"+xCI9S1wtaLSDpLrpcbKgsRWL9b7EtCu4dOrhdJQ2JCMOciRlpQr5nF60xAfsP1103xn96JF9sa7eB/7",
+	"Yi7y0VgKmqV43puQGVuuA/UGW6RFIktHtuG8g0fXNkFq5+UKsPc0RwwI15oi9+GAS9ysq4n048dhb1ut",
+	"lza3W9YAtrC1rc2XiH4vsm5ZUC1V+dmLjp5wHu9A/vuFPIVZQ72as37HoDvt28/1kP2H1D7vxWXuR7hN",
+	"mNh+MWJhc2M9ba+ntYe4OrAjPeLNQYezrkaFjxXIW3MR3cS29VrBXj6sK47svSr+YW9Mgzpfi6rbR4Sz",
+	"3mhRRsv+sf9kPEOhX9ibw5f2Nnu8qCPTMLCKpYLb67KcjiFXeMXbWWQzutmNjFDml/YbfWsYOB4rEzqK",
+	"IykqDXLD6hv7cMmbTiUGexHLh18SUTCt0SnAIM+UcRPUmnGPXAHaS8NoGCVE45UgUEmS1ojobfCszFxD",
+	"tnhPYgK7gnSR9MhvCkjy6vXb19evyYlluerkC8vuTuy9J85X8TGCtgnLDIVx/WVkwl9HCHx3vv/vx+j3",
+	"ZO6rHLBjy7cs2osojjDkLMgLXnuLuUszEP7ax0M0VgIXemTD7UMYZtMktvN1M27TfpXBL7W3ywvJgV+A",
+	"5nq2uvJGP2/WLm5CizZ6dyC0XprwYwypMOwbDTUtSMbolAvlI32akAti1qh6u117daOFNwOr1qTdSL5j",
+	"CBxvxZTxVgZKFyh1KOua+NYOC3mxlVgqBTJAZy+ex3t5Ruth4mYtob0tU15HEueMV59X5HDdhSjTh0xo",
+	"wfLFS8K43T8TGFW3LHjnjGdijiD3wxY0FfiZ8kwKYzxNJMBY4V9QjCHL1niLlk3HFUR7BZLdNj54H5OG",
+	"MXKpxijr1MYttNfHhdFY5vTGxUjMKo27HK2NYPiALoa1Prd7+D/uGaQV8KO0XSirfLyJxQ/Ky/uY4Uvo",
+	"1w68aWZrR9804Amh5UegGeOO4wcAa/6iWcYssn3otFjlRsvDq5XYGJ+ogKzY/v0p3pWFuBWF9zGRoGZr",
+	"mYe0v6+7S1iests8NKE9j0ujWYZgh9/vh5Q+u3N0P++MDecLHssD4FnrDOqdrQfLL0xpIRffaod1YPx4",
+	"1pjlyG/4RKwumBo/p8WDkdZbXIZ4W5WJVIXJ3fHCkY8rDdCcD+TaPA1GfW1qEaJEvHoF3lUpBj/0f+iH",
+	"HaVZRylL6+vTKHYWShxhPkqQXXsd2Mm3wDZ3c8A6m3akZ0iLIs/CzTZ7X0Ow6FD39lOVoIGbkNWMLta0",
+	"0fmaQ99ZUfINHfTXI+qvoCVLQwwbTyjdOzK6rEapkLBmY/hzCTIFvjSmqKykcV14VYxtj4ypm9XFocYx",
+	"wmA+1RmGcf3iefCCwOSMB4WM0DTfayj0X+zRIYQyG29zbkByyLu0dd47Pe/1j0/752fHkqqSBe9hBM1G",
+	"9BakszuWIn5icm48LKfnpGC80kCwA3EdVH3pMp+BtAlm76/IjCrCBYdOfsgOx1bQz29sc3tp23xYZru5",
+	"SGk+YmWXka9TBupuBRRBmUBvKctRbdnrTL8LFpQ51dixe9RGzT6hsmiP07n8T4MK1lRIUWkvCFYXPANa",
+	"mgj5dD/CYWsYpVRqP4CVyDPavPFeQJOAsEC+FEhOMLzMxN3YMEUP4SZMBz6XQgE5QKejgzkRnFxYW+aw",
+	"HdtvsqXgc5lTxsl8ZsKAFsYHWNjc7Q5NtA6wTYbxdky+H2C6LoQWq27hVYjrX6OU+kCZ3KydBGkQPpdM",
+	"ghqxUF6v6eyi3HI2AdwUYZw0t2QhWbhZj44jJ1S9W6cG8k9ApdEftqQBt7e0PF9n9M7uQoD7TYFclw+4",
+	"1ehruwd2iIysmwe9QQrSSjK9uDKJ8GYZYwOOi0rPmk9/94v6j9+voyZt3v3arNIky5sKBcwprUthQ6+v",
+	"rk0Eo7u5/0UUcClkOwzOpNcdkYs8J8kJLdnJ7WlCgGelYEhIbn+EEnts5D9+vyYVzxFhCioxok/oGcg5",
+	"U9DDga6NCEJS44JIkYMaEDDR65gZBFyz1CThVcql56SYZGNbCOvnEJwcXLz6eNw/PT00Y/5Ob+CkTviz",
+	"oeMmh44g6pYaXOwSod7N8JKUAnf08+tr4nZ14n6yzvjE3F0gTESlUwzjXZ0IN3F0xDIoSqGB66MjI4SP",
+	"jjCshkyo0kdHAyKhBOucERyM0MVRYTKB1ITdK5sDQpgeckIET8GMUkfCI6eSUpjaGUDQcm/ggNUCtI23",
+	"ODrC4edLkLD5iSVI52/BKfCTpdyjoxiz/jjCm6ZSKEUQ2Ah69ZIUiAg2JZEkz89+JJ2KHy7ArFW4Y0BO",
+	"bTLmpeC3Vg9WA4s9R0fGIasQQvmcLhTxie7AbyEXJZDky9D6T4bR4MvQuE6HUTz0ztNhdHeXxITxNK8M",
+	"uJLz/imy/RFDtlEAbiLB7eG51QBaCWm3So8mrV5kAbpnV4l3gmaR0tdaOi7plHGDkQeJ2btJQTO/4V/t",
+	"6kuHJoRUgjk7QYziYeHbw4W9l5kpDkAm7DNk5hg8HQ3c8agma5ccpFTBMeMKjFPtFmJCVWqR5TD2iIxY",
+	"MgdlcGfCpNKxz4SdWdPa/W5/dNu8xOssg5Glcw1iwqC7CsMKB5wkHy6uL3/pXlAlA4OsBiOLUi+I5XPk",
+	"wF6UHSLocR3r78nI7tdk7zfdz5lZMGI/sbC2ebQ9ci2IhELcQitLdWxvvywf2XTx5oDz3sPEl3Rq4ILs",
+	"aAwtZZovo1dKOa5GVWWZG62i6OgjuO7CWmWErlVhDpdLe5iqHmZWZA6KDP3F7jCyN4M5S4ErI4KsKEJP",
+	"aCkZaCoX1vTVRrbWDP7iw5uWj30Q9XunvT62FCVwWjJM1er1e88ia18ZSeQZJTLqkxxd8PhtKawbraY5",
+	"LOdlPfRRndD4k8gerhZWx/t/15WyLry3U47rrN9/sLkbHStQ+OeiLcEQmM/7/XUD1is8aRXTMl1Ot3fp",
+	"1DPCTmc/bu+0XDWqrW9Egz8+xZGqigIRZhC9/mxJjXh15cTfWVi5iFAweh+dKqOMoXryCUdcRhJR6Y1Y",
+	"gr8/DposeXp3QpTngewvMcUsLVzn/Y7nrg3Yj3ArblBdcvqq06rthc12gFo1cwoBWP4M2tVGMersI9KA",
+	"GT9ULM1Ob3DmIWDVGW8raBxA1yObw4fr2mD4c6DcE/GmdzB3uFZS5o7nKZjTBibzUWiqV2kBtV9MSKCo",
+	"urTXvAkFvDq0ljxQtbv0jeJO2c0/wjtqmpzYOpJ38daGrn4ntgyVnGxfwu1RxzI8WH3Tsht2LNUAuPv0",
+	"iJjYzs4PMQp/Dg/BJOxYXt1tIUmNEkFEMZrfRmZqG67iysMXKn2Co9hwDPfXOvrPt3eqS2R2j+1nQ+Bp",
+	"DePNh5ZlfDNlN/lh6lsl3zfFg9bLuHf1pNVjapV7exCKQXiR1RpybXXOwPvTXbxGktow9dZmH0earqTo",
+	"7iRPTx9h/iD1mDVlTytJ60O8yDJCA6e4eohLZHTS1P89wQw31VaYujv8O0Cm6ipuJJOiNG4l5yw0k9u6",
+	"hvMZS2doiuP3GGZE5nRBtDBJvYSa/gPSFEqkesjRmIaMaWL2QDmhuRKmzARh2jjrudAz4xlTBInERBbP",
+	"MEaIvNH4JSXJh/dX14mdUQkzsK035CaS9BZyha5qXNhYZAtfcJNxQslvH98SYTxs1plMcjE9fNnUZlB+",
+	"CT1SV6oYcudxUFpI44qI4pCq0amlph6JQlbKXD6xxhmoXxegFAuBpzSH9xNMcXTeP9tpYb6qd4ChLlVP",
+	"MaRVY7wrzrc/cZ58cVmodycuAX25ZnxYIWnnX6/TSjYHL36Kt3IFu6L1fIEcKFo4skMVzQYeKVOcNl+l",
+	"kQSd+cnz/nOXm9wujcqUr7+1neBctYB/e5Jr1eoMlex2UPgvQHYXJxgH3q48SpdJcTvleXMggxxs/kgX",
+	"x16Z75d0nm2+I9vp+2jYdu4dlYR9DWL3LIThElSns1V42TycJ9QR7YRPTY6bdcTfXNb9n5cIOyhjlxtE",
+	"GXJQ2gSqw91I6UQteBqQVXvgVdD0wKIKm4jwYU+2VcIhcLr4K3G1Db7HcV25YrpMgblbNqfmhDIX880H",
+	"Ze+/NhvVrs2je8se0//RSvYM2dZuiw9lVmc1yGrQu2+2WtOm3WNxyXZ2+VNb0XZjfwYLGjvtcFFWPy+z",
+	"fHUzZUqDJNQdc/CUV2lsV9WiQYC/hFqxAQbxWqfquk32nwDd/C/fzdu5EWJ7ykn/cNZ2Dezx+cp30rzW",
+	"HvRfVeuy6BDWtLbxl5M6HbzhMkvvaNVxau69EzedcZqZx0UUGVfaRUjVYTMHyVn/eWJe1li+TsVAG3sK",
+	"Fy7TYzvrcrnoLkwnIwemHioHuwLIDp/O+vw2WbAmyugAN6aheX6AC5ILPgVJSqEUG+dw+NAcYB1KzJrk",
+	"qs38+Jf67uwvrOh1E8oCbKH+6Xuo6mZxpCkP5NwUjyMS1iGEqcB1D6OsI2yCOqxJvH184d7O7w2csPn5",
+	"e1pkHyu8Vri+/GCLnS1bYVuZuOcaD3RGyx5BXUlurk38PIm/gTVs/iw57JFGTAwIQxT1beumePOSm4xc",
+	"n7tt4j71jKmOTGm199W8YxvaPGm/StIaLnGJfIn53fUfcl8FXxFWFJAxqiFf1MUo3TtiyHybein1c1gp",
+	"VXYKF0XdIxf1wsQEVw02QN1cMZEDDKA+xA6MZ1ACz+y7LFkTo0lt5LbZLmZPYYTzWzaBdJHmMGg9LfP/",
+	"/s//9a/IHPhIbPdwjBnQPxpzaFt2X4c5qPcy5NQFsROmXdvWazCm4ZoHX6aifiDFvZnYeVUlHnKXeUlO",
+	"z/pEHfaaV2GMB77z+osKPf6i2idlItSHvP0SjAkldnEGGB9dj2iBR9RMSE2o1lCU9tKPctJ6ms5NZuYf",
+	"cjzyJu2k13lgpo7G9Tu0T3+oOvDZ3C38SLxAd7eGdTd/Qi6Cdy7kDaEa4+EHbZA67agj9M21xdmP9Roa",
+	"OvCILSEFU/6AronQz231dcrJKVGETkVvyC+qzLy3yThJKP49ysU0Cd1/XLnh1jHgs6eIJrla5hMebf+0",
+	"Gt23xM22NEF7gtTTdn22t4wuVbqwj+DQ1iNYMWnSR0J6YbwuIKYtNRClHlti4By7SAtst1lSGAJBzvNt",
+	"koKvCApSy4khDwkKn2hD3YNXuwoJ0pURQ37gj3h/QXE960CnFhaxfb/TiQuTBGT4evvtsRwmiD1mH/Xb",
+	"TAZk9qHNIafadqXNk0xLOSlLUkZpKE00xRhSUYDqSBbPGoe8Fi/gki+7D46FZAs5qEXLDyhaXEX2ml8P",
+	"eTst7EF5cyfH5JF48woLxsyw78p+f28TXq0xHCC8EETmJt6kjrjtm3ql5nXWYXT4782iTTE/hM+x4Mdv",
+	"L949DAu2pZZOmooXxzew0dbuPq/0qCGf7YlCeSq+5JJv13436QGuQtzLRSgQkeHegI0Fo0qDfRGX8vqJ",
+	"RC0r895Zs5j27YkFchDwPqPVgXs52r1+VZlxhRqjBK1iXIrRYycsRwVRz9SqY+tn0K1CL4/psWhmCT89",
+	"70+nVcbrYXJQaHZsOGx4DsOrbYIqokldnWWnYymaoiPrCKFbneTRAewnCr3U7n/6dqC6oby+MDM10CvO",
+	"vV162a6ME4TjzNT4+9cmyP3imjwizOwUa7wrJkjSqGHsFjbmdrxlt8CxtfU5NVu2u3RbNhJ4444/2haP",
+	"uOGmsFkwiopmCxuq9OxpZnwn7Ftri82pM34I52g6yKim+CQeqU3nmBRs6rOgzWLRux46iO483YoDf3y6",
+	"++QL81qzopJ5NIhOjNngxqqzTt2Yd3H9Da26n7P6wr3+Km2yQervlK862nTMuELX5v8fAA==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

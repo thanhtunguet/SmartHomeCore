@@ -43,8 +43,8 @@ func newTestHandler(t *testing.T) http.Handler {
 		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 		DB:     db,
 		Authn: tokenAuth{
-			"admin-token":  {UserID: "u1", Username: "admin", Role: auth.RoleAdmin},
-			"viewer-token": {UserID: "u2", Username: "viewer", Role: auth.RoleViewer},
+			"token-a": {UserID: "u1", Username: "alice"},
+			"token-b": {UserID: "u2", Username: "bob"},
 		},
 	})
 	if err != nil {
@@ -83,12 +83,14 @@ func TestRoutesAndPolicy(t *testing.T) {
 
 		{"protected without token", "GET", "/api/v1/devices", "", 401},
 		{"protected with bad token", "GET", "/api/v1/devices", "bogus", 401},
-		{"viewer can list (not implemented yet)", "GET", "/api/v1/devices", "viewer-token", 501},
-		{"viewer cannot create", "POST", "/api/v1/devices", "viewer-token", 403},
-		{"viewer cannot shutdown", "POST", "/api/v1/devices/" + devID + "/shutdown", "viewer-token", 403},
-		{"admin passes policy for shutdown", "POST", "/api/v1/devices/" + devID + "/shutdown", "admin-token", 501},
+		{"any user can list (not implemented yet)", "GET", "/api/v1/devices", "token-b", 501},
+		{"any user can create (not implemented yet)", "POST", "/api/v1/devices", "token-b", 501},
+		{"any user can shutdown (not implemented yet)", "POST", "/api/v1/devices/" + devID + "/shutdown", "token-b", 501},
+		{"any user can use DDNS (not implemented yet)", "GET", "/api/v1/ddns", "token-b", 501},
+		{"cloudflare lookup needs a token", "POST", "/api/v1/ddns/cloudflare/zones", "", 401},
+		{"cloudflare lookup (not implemented yet)", "POST", "/api/v1/ddns/cloudflare/zones", "token-a", 501},
 		{"login is public (not implemented yet)", "POST", "/api/v1/auth/login", "", 501},
-		{"bad uuid path param", "GET", "/api/v1/devices/not-a-uuid", "viewer-token", 400},
+		{"bad uuid path param", "GET", "/api/v1/devices/not-a-uuid", "token-a", 400},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -121,7 +123,7 @@ func TestHealthBodyAndSpec(t *testing.T) {
 
 func TestUnimplementedUsesErrorEnvelope(t *testing.T) {
 	h := newTestHandler(t)
-	rec := do(h, "GET", "/api/v1/devices", "viewer-token")
+	rec := do(h, "GET", "/api/v1/devices", "token-a")
 	if rec.Code != 501 {
 		t.Fatalf("status %d, want 501", rec.Code)
 	}
@@ -139,11 +141,11 @@ func TestUnimplementedUsesErrorEnvelope(t *testing.T) {
 func TestRemoveDeviceAgentPolicy(t *testing.T) {
 	h := newTestHandler(t)
 	p := "/api/v1/devices/0193a0b2-7c4e-7f00-8000-000000000001/agent"
-	if got := do(h, "DELETE", p, "viewer-token").Code; got != 403 {
-		t.Fatalf("viewer → %d, want 403", got)
+	if got := do(h, "DELETE", p, "").Code; got != 401 {
+		t.Fatalf("anonymous → %d, want 401", got)
 	}
-	if got := do(h, "DELETE", p, "admin-token").Code; got != 501 {
-		t.Fatalf("admin → %d, want 501 (planned)", got)
+	if got := do(h, "DELETE", p, "token-a").Code; got != 501 {
+		t.Fatalf("user → %d, want 501 (planned)", got)
 	}
 }
 
@@ -152,9 +154,9 @@ func TestSystemInfo(t *testing.T) {
 	if got := do(h, "GET", "/api/v1/system/info", "").Code; got != 401 {
 		t.Fatalf("anonymous → %d, want 401", got)
 	}
-	rec := do(h, "GET", "/api/v1/system/info", "viewer-token")
+	rec := do(h, "GET", "/api/v1/system/info", "token-a")
 	if rec.Code != 200 {
-		t.Fatalf("viewer → %d: %s", rec.Code, rec.Body)
+		t.Fatalf("user → %d: %s", rec.Code, rec.Body)
 	}
 	var info struct {
 		Version, Mode string
@@ -199,5 +201,49 @@ func TestStaticCacheHeaders(t *testing.T) {
 		if got := rec.Header().Get("Cache-Control"); got != tt.want {
 			t.Errorf("%s: Cache-Control %q, want %q", tt.path, got, tt.want)
 		}
+	}
+}
+
+// REQ-API-018: one wake/shutdown request per device per second, across users and command types.
+func TestDeviceCommandThrottle(t *testing.T) {
+	h := newTestHandler(t)
+	devA := "0193a0b2-7c4e-7f00-8000-00000000000a"
+	devB := "0193a0b2-7c4e-7f00-8000-00000000000b"
+
+	if got := do(h, "POST", "/api/v1/devices/"+devA+"/wake", "token-a").Code; got != 501 {
+		t.Fatalf("first wake → %d, want 501 (admitted; handler not implemented yet)", got)
+	}
+	rec := do(h, "POST", "/api/v1/devices/"+devA+"/wake", "token-b") // another user, same device
+	if rec.Code != 429 || rec.Header().Get("Retry-After") != "1" {
+		t.Fatalf("second wake → %d Retry-After=%q, want 429 / 1", rec.Code, rec.Header().Get("Retry-After"))
+	}
+	var body struct {
+		Error struct{ Code string }
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Error.Code != "rate_limited" {
+		t.Fatalf("bad envelope %q: %v", rec.Body, err)
+	}
+	if got := do(h, "POST", "/api/v1/devices/"+devA+"/shutdown", "token-a").Code; got != 429 {
+		t.Fatalf("shutdown right after wake → %d, want 429 (shared per device)", got)
+	}
+	if got := do(h, "POST", "/api/v1/devices/"+devB+"/wake", "token-a").Code; got != 501 {
+		t.Fatalf("other device → %d, want 501 (independent)", got)
+	}
+	if got := do(h, "POST", "/api/v1/devices/"+devA+"/probe", "token-a").Code; got != 501 {
+		t.Fatalf("probe is not a power command → %d, want 501", got)
+	}
+}
+
+// An anonymous request must not use up a device's slot.
+func TestDeviceCommandThrottleAfterAuth(t *testing.T) {
+	h := newTestHandler(t)
+	p := "/api/v1/devices/0193a0b2-7c4e-7f00-8000-00000000000c/shutdown"
+	for range 3 {
+		if got := do(h, "POST", p, "").Code; got != 401 {
+			t.Fatalf("anonymous → %d, want 401", got)
+		}
+	}
+	if got := do(h, "POST", p, "token-a").Code; got != 501 {
+		t.Fatalf("authenticated → %d, want 501 (slot untouched)", got)
 	}
 }

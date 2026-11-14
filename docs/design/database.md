@@ -3,10 +3,10 @@
 | | |
 |---|---|
 | Engine | SQLite 3 (embedded) via `modernc.org/sqlite` (pure Go, [ADR-004](decisions.md#adr-004--sqlite-driver-moderncorgsqlite-everywhere)) |
-| Schema version | `2` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`) |
+| Schema version | `3` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`, `0003_users_no_roles.sql`) |
 | Owner role | Controller only. The Agent has no database |
 | Requirements | [storage-and-secrets.md](../requirements/storage-and-secrets.md) |
-| Last reviewed | 2026-11-12 |
+| Last reviewed | 2026-11-14 |
 
 The DDL in `internal/storage/migrations/` is authoritative. This document explains it and must be
 updated in the same change as any new migration.
@@ -78,14 +78,13 @@ Mapping from the brief's table list (§3.7):
 
 ### users
 
-Accounts for the REST API.
+Accounts for the REST API. No roles (ADR-011): migration `0003` dropped the `role` column.
 
 | Column | Type | Null | Default | Constraint / note |
 |--------|------|------|---------|-------------------|
 | `id` | TEXT | no | | PK, UUIDv7 |
 | `username` | TEXT | no | | `UNIQUE COLLATE NOCASE` |
 | `password_hash` | TEXT | no | | argon2id encoded string (planned) |
-| `role` | TEXT | no | | `admin` \| `viewer` |
 | `disabled` | INTEGER | no | `0` | bool |
 | `created_at`, `updated_at` | INTEGER | no | | unix ms |
 
@@ -237,7 +236,7 @@ One managed Cloudflare DNS record per row.
 | `interval_seconds` | INTEGER | no | `300` | |
 | `enabled` | INTEGER | no | `1` | bool |
 | `api_token_sealed` | BLOB | no | | sealed, AAD `ddns_configs.api_token`; never returned |
-| `cf_record_id` | TEXT | no | `''` | cached Cloudflare record id |
+| `cf_record_id` | TEXT | no | `''` | Cloudflare record id, always the one chosen in the form's record dropdown (`record_id` is required by the API; `''` only for rows that predate it) |
 | `last_ip` | TEXT | no | `''` | last value written/confirmed |
 | `last_synced_at` | INTEGER | yes | | last success |
 | `last_error` | TEXT | no | `''` | |

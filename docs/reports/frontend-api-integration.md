@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Date | 2026-11-12 (first pass); resolution log in §9 (second pass, same day) |
+| Date | 2026-11-12 (first pass); resolution logs in §9 (second pass, same day) and §10 (third pass, 2026-11-14, after the owner's decisions) |
 | Scope | `frontend/` (git submodule, HomeCoreUI) wired to the Controller REST API (`api/openapi.yaml` 0.1.0) |
 | Related | [web-ui requirements](../requirements/web-ui.md), [ADR-009/010](../design/decisions.md), [changelog](../changelogs/2026-11-12-frontend-api-integration.md) |
 | Status | UI side wired and smoke-tested against a spec-conformant mock. **Controller business endpoints still return 501**, so the end-to-end path against the real Controller is not yet possible. |
@@ -21,10 +21,10 @@ listed in §4 (API/spec gaps), §5 (inconsistencies found in the original UI, mo
 Severity: **High** = blocks a user-visible flow or breaks a stated requirement · **Medium** = feature
 degraded or workaround in place · **Low** = cosmetic or future-proofing.
 
-Status markers on the IDs (state after the second pass, 2026-11-12; details in [§9](#9-resolution-log-second-pass-2026-11-12)):
+Status markers on the IDs (state after the third pass, 2026-11-14; details in [§9](#9-resolution-log-second-pass-2026-11-12) and [§10](#10-resolution-log-third-pass-2026-11-14-owner-decisions)):
 **✅** closed · **◐** partly done: the spec, DB and UI work is in (or, for GAP-INF-01, the requirement is written) but the
 Controller handler or provider is still pending (the phase is named in §9) · no marker = still open. The *Finding*/*What the UI does now*
-text of a marked row describes the first pass; §9 has the current behaviour.
+text of a marked row describes the first pass; §9 and §10 have the current behaviour. Where §10 says a role or viewer rule is gone, read the first-pass text accordingly (ADR-011).
 
 ## 2. What was wired
 
@@ -60,21 +60,21 @@ the Controller's behaviour.
 | ID | Sev | Gap | What the UI does now | Suggested change |
 |----|-----|-----|----------------------|------------------|
 | GAP-API-01 ◐ | Medium | `Device` has no **type** (desktop/NAS/TV…) or **OS**; the UI uses both for icons and labels | Stored per browser in `localStorage` keyed by device id (`api/deviceMeta.ts`): not shared between browsers/users, lost when browser data is cleared, defaults to desktop/linux | Add optional `device_type` and `os` (or a free-form `tags`/`metadata`) to `Device`, `DeviceCreate`, `DeviceUpdate`; add a migration |
-| GAP-API-02 | Medium | No way to **list Cloudflare zones/records** | Zone ID and record name are typed by hand; the old "pick zone, pick record" dropdowns are gone | `GET /ddns/zones` and `GET /ddns/zones/{id}/records` (token supplied once, or from an existing config), or accept zone *name* and resolve it server-side |
+| GAP-API-02 ◐ | Medium | No way to **list Cloudflare zones/records** | Zone ID and record name are typed by hand; the old "pick zone, pick record" dropdowns are gone | `GET /ddns/zones` and `GET /ddns/zones/{id}/records` (token supplied once, or from an existing config), or accept zone *name* and resolve it server-side |
 | GAP-API-03 ◐ | Medium | No **detected public IP** and no **current DNS value**; `DdnsConfig` only has `last_ip` | Dashboard "Public IPv4" shows the last IP pushed; the "WAN IP changed, sync needed" comparison cannot be shown | Add `detected_ip`, `dns_value`, `last_checked_at` to `DdnsConfig` (or `GET /system/public-ip`) |
 | GAP-API-04 ◐ | Medium | `PATCH /devices/{id}` cannot **unset** anything: no way to remove an agent binding, clear the MAC, broadcast or description | Disabling "remote shutdown" in the form keeps the old binding (the form says so); clearing fields sends `""`, which the server may reject | Define merge-patch semantics with `null` (e.g. `"agent": null`), or add `DELETE /devices/{id}/agent` |
 | GAP-API-05 | Medium | No **activity/audit endpoint** although the `audit_log` table exists (REQ-API-008 gap) | Activity = command history + events of this browser session; probes, device edits, DDNS actions and other users' actions are lost on reload | `GET /api/v1/activity` (cursor, filters by device/category), fed by `audit_log` and status history |
 | GAP-API-06 ✅ | Low | No **settings/info endpoint**: server name, listen address, monitoring defaults, session lifetime, retention live in YAML | UI Settings shows only what `/healthz` and `/system/metrics` give; defaults for new devices are browser-local | Read-only `GET /system/info` (version, mode, listen, defaults); decide whether any setting should become writable |
 | GAP-API-07 ◐ | Low | `SystemMetrics` is a subset of what the System screen was designed for: no CPU core count, kernel, per-interface MAC/Rx/Tx, PID, process uptime, load average, "restricted metrics" list for Android | Those tiles were removed; platform string is split into OS/arch | Extend `SystemMetrics` (Phase 4, `gopsutil`) or drop the tiles from the design |
 | GAP-API-08 ◐ | Low | `Device` has no **last latency** or **consecutive failures** | Latency is shown only after a manual probe in the current session | Add `last_latency_ms` (and optionally `consecutive_failures`) to `Device` |
-| GAP-API-09 | Medium | No **agent health/version**; the UI used to show "Agent ready/unreachable" and a version | "Agent status" is inferred: bound + device online = ready, bound + offline = unreachable. It is a guess, labelled "Bound (host online)" | Add `agent.status`, `agent.version`, `agent.last_ok_at` to `AgentBinding` once the dispatcher exists |
-| GAP-API-10 ◐ | Medium | **Command semantics are not in the spec**: what `completed` means per type, when `acknowledged` occurs, default deadlines, and what `409` on wake/shutdown means (already active vs. no MAC vs. no agent vs. already online?) | UI relies on [architecture §8.2](../design/architecture.md#82-command-lifecycle) and prints the server's `message` for any error | Copy the §8.2 state table into the `Command` schema description; enumerate `409` causes per operation |
+| GAP-API-09 ◐ | Medium | No **agent health/version**; the UI used to show "Agent ready/unreachable" and a version | "Agent status" is inferred: bound + device online = ready, bound + offline = unreachable. It is a guess, labelled "Bound (host online)" | Add `agent.status`, `agent.version`, `agent.last_ok_at` to `AgentBinding` once the dispatcher exists |
+| GAP-API-10 ✅ | Medium | **Command semantics are not in the spec**: what `completed` means per type, when `acknowledged` occurs, default deadlines, and what `409` on wake/shutdown means (already active vs. no MAC vs. no agent vs. already online?) | UI relies on [architecture §8.2](../design/architecture.md#82-command-lifecycle) and prints the server's `message` for any error | Copy the §8.2 state table into the `Command` schema description; enumerate `409` causes per operation |
 | GAP-API-11 ✅ | Medium | **Error codes are not enumerated** (`error_code` on commands: `clock_skew`, `agent_rejected`, …) | Raw `error`/`error_code` text is displayed | Document the code list (agent-protocol §errors) in the spec as an enum or table |
 | GAP-API-12 ✅ | Low | **List ordering and totals are unspecified**: no `total`, no documented sort for devices/commands/history | UI assumes devices in server order and sorts activity by timestamp itself | State the order in the spec (e.g. devices by name, commands newest first); consider `total` |
-| GAP-API-13 | Low | `allow_viewer_wake` appears in [architecture §9](../design/architecture.md#9-rest-api) ("viewers can wake") but `wakeDevice` in the spec is admin-only | UI follows the spec: viewers cannot wake | Pick one; update the spec or the architecture table and the config key |
+| GAP-API-13 ✅ | Low | `allow_viewer_wake` appears in [architecture §9](../design/architecture.md#9-rest-api) ("viewers can wake") but `wakeDevice` in the spec is admin-only | UI follows the spec: viewers cannot wake | Pick one; update the spec or the architecture table and the config key |
 | GAP-API-14 | Low | No **user/password management** (change password, list users) | Old Settings fields for username and "session timeout" were removed | Backlog; needed before exposing beyond a home LAN |
 | GAP-API-15 | Low | `Device.hostname` exists in the API but not in the UI form | Not editable from the UI | Add a field to the form when hostname-based probing is implemented |
-| GAP-API-16 | Low | DDNS is **admin only**, so viewers see nothing about it (not even status on the dashboard) | Viewers get an "administrators only" notice and an empty dashboard card | Decide whether a secret-free read-only summary should be viewer-visible |
+| GAP-API-16 ✅ | Low | DDNS is **admin only**, so viewers see nothing about it (not even status on the dashboard) | Viewers get an "administrators only" notice and an empty dashboard card | Decide whether a secret-free read-only summary should be viewer-visible |
 
 ## 5. Inconsistencies found in the original UI
 
@@ -105,8 +105,8 @@ Fixed in this change unless stated otherwise.
 | GAP-INF-03 | Low | Same secure-context limit affects the **clipboard API**: "Copy" buttons for the controller key do nothing over plain HTTP | The key is rendered as selectable text; consider enabling TLS on the Controller (`controller.tls`) for the UI |
 | GAP-INF-04 ✅ | Low | Static handler sends no `Cache-Control`/`ETag` (embedded files have a zero mod-time, so no `Last-Modified` either) | Add `immutable` for `/assets/*` (hashed names) and `no-cache` for `index.html` |
 | GAP-INF-05 | Low | Polling cost per open tab: devices 10 s, commands 15 s, metrics 10 s, DDNS 30 s, health 60 s (paused in hidden tabs). The device list is refetched in full each time | Fine for <10 users; add `ETag`/`If-None-Match` or `updated_since` if it matters (no WebSocket/SSE by scope) |
-| GAP-INF-06 | Medium | Wire types in `frontend/src/api/schema.ts` are **hand-written**. `openapi-typescript` needs TypeScript 5 as a peer, the UI uses TypeScript 7; nothing detects spec drift | Backlog: generate from `api/openapi.yaml` in CI (`make check-generated` style) or pin TypeScript |
-| GAP-INF-07 | Medium | The frontend has **no automated tests**; the smoke test used here (headless Chromium against a mock) is not in the repository | Backlog: keep a contract mock or, better, run the UI e2e against the real Controller in CI once Phase 1b/2 land |
+| GAP-INF-06 ✅ | Medium | Wire types in `frontend/src/api/schema.ts` are **hand-written**. `openapi-typescript` needs TypeScript 5 as a peer, the UI uses TypeScript 7; nothing detects spec drift | Backlog: generate from `api/openapi.yaml` in CI (`make check-generated` style) or pin TypeScript |
+| GAP-INF-07 ◐ | Medium | The frontend has **no automated tests**; the smoke test used here (headless Chromium against a mock) is not in the repository | Backlog: keep a contract mock or, better, run the UI e2e against the real Controller in CI once Phase 1b/2 land |
 | GAP-INF-08 | Medium | The submodule URL is **SSH** (`git@github.com:thanhtunguet/HomeCoreUI.git`); clones without that key cannot fetch it. The UI changes of this work sit uncommitted inside the submodule | Commit and push them in `frontend/` first, then commit the new gitlink in this repo. Consider an HTTPS URL for CI |
 | GAP-INF-09 | Low | The UI has no router (tab state only): no deep links, no browser Back | Acceptable for the MVP; the SPA fallback is ready if routing is added |
 | GAP-INF-10 | Low | `make build` does not build the UI (CI/cross builds need no Node); `make build-full` does | Release pipeline (Phase 6) must run `make ui-build` before `make cross` |
@@ -177,3 +177,29 @@ Next steps for whoever picks this up: when the Phase 2/3/4 handlers land, re-run
 Controller for every ◐ item, then flip it to ✅ here and in the roadmap.
 
 Still open and needing a decision or later phase: GAP-API-02, 05, 09, 13, 14, 15, 16 and GAP-INF-06..10.
+
+## 10. Resolution log (third pass, 2026-11-14, owner decisions)
+
+The maintainers answered the open questions of the first list. Decisions are recorded as
+[ADR-011](../design/decisions.md#adr-011--no-roles-every-authenticated-user-is-equal) (no roles) and
+[ADR-012](../design/decisions.md#adr-012--idempotent-fail-fast-power-commands-with-a-per-device-throttle)
+(idempotent, fail-fast commands, per-device throttle). Details: [changelog](../changelogs/2026-11-14-no-roles-throttle-ddns-lookup.md).
+
+| ID | Result | How |
+|----|--------|-----|
+| GAP-API-13 | Closed (moot) | No roles, so "viewers can wake" has no meaning. `allow_viewer_wake` removed from config and docs |
+| GAP-API-16 | Closed (moot) | DDNS is open to every authenticated user; the viewer notice is gone |
+| INC-UI-13 | Superseded | The viewer gating of the second pass was removed (REQ-UI-008 `Removed`) |
+| GAP-API-10 | Closed | Idempotent commands, `409` only for a missing MAC / agent binding, `429` for more than one request per device per second, opposite types independent (REQ-API-018/019). **Handlers still pending** (Phase 2/3); the throttle itself is implemented and tested |
+| GAP-API-09 | Spec and UI done; dispatcher pending (Phase 3) | `AgentBinding.status`, `version`, `last_ok_at` (REQ-API-021); the UI uses them when present and labels the old inference otherwise |
+| GAP-API-02 | Spec and UI done; Cloudflare client pending (Phase 4) | `POST /ddns/cloudflare/zones` and `.../records`, `record_id` required (REQ-API-020); dropdowns are the only way to pick zone and record (no manual entry: a token that can edit DNS can read it). Until Phase 4 DDNS records cannot be created from the UI |
+| GAP-API-05 | Recorded, not started | `GET /activity` is a Phase 3 roadmap item; not in the spec until it has a use |
+| GAP-API-14 | Deferred, with a plan | `homecore user add\|passwd` command in Phase 1b replaces the first-run bootstrap (REQ-API-022); no API or UI |
+| GAP-API-15 | Deferred | Waits for hostname-based probing |
+| GAP-INF-06 | Closed | Wire types generated by `openapi-typescript` (workspace `tools/apigen`, TypeScript 5), `check:api` detects drift, a contract test ties every endpoint the UI calls to the spec (REQ-UI-016) |
+| GAP-INF-07 | Partly closed | 110 unit/contract tests (`make ui-test`). Not covered: React components and flows; no end-to-end run against the real Controller (owner tests manually) |
+| GAP-INF-08, 09, 10; GAP-INF-02, 03, 05 | Unchanged | Still open or accepted as before. INF-08: the submodule commits are still local |
+
+Still open: GAP-BE-01, BE-03 (Phases 1b–4), the ◐ items waiting for handlers (GAP-API-01, 03, 04, 07, 08, 09, 02), GAP-INF-01 (Phase 1b), GAP-API-05, 14, 15, GAP-INF-02, 03, 05, 08, 09, 10.
+After the Phase 2/3/4 handlers land, re-run the UI against the real Controller for every ◐ item and flip it to ✅.
+

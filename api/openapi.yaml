@@ -6,8 +6,11 @@ info:
     REST API of the HomeCore Controller.
 
     * All `/api/v1` endpoints require a Bearer JWT unless marked otherwise.
-    * Operations whose security requirement lists `admin` require the admin role.
+    * There are no roles: every authenticated user may call every operation (ADR-011).
     * Wake/shutdown return `202 Accepted` with a command; poll `GET /api/v1/commands/{id}` for the outcome.
+    * Wake/shutdown are **idempotent** and **fail fast**: repeating one has the effect of sending it
+      once and is never an error (see each operation). At most **one wake/shutdown request per device
+      per second**, counted across all users; more answer `429 rate_limited` with `Retry-After: 1`.
 
     Conventions:
 
@@ -155,8 +158,6 @@ paths:
       tags: [devices]
       operationId: createDevice
       summary: Register a device
-      security:
-        - bearerAuth: [admin]
       requestBody:
         required: true
         content:
@@ -170,7 +171,6 @@ paths:
               schema: { $ref: "#/components/schemas/Device" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
 
   /api/v1/devices/{id}:
@@ -192,8 +192,6 @@ paths:
       tags: [devices]
       operationId: updateDevice
       summary: Update a device (partial)
-      security:
-        - bearerAuth: [admin]
       requestBody:
         required: true
         content:
@@ -207,18 +205,14 @@ paths:
               schema: { $ref: "#/components/schemas/Device" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [devices]
       operationId: deleteDevice
       summary: Delete a device
-      security:
-        - bearerAuth: [admin]
       responses:
         "204": { description: Deleted }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/v1/devices/{id}/agent:
@@ -229,12 +223,9 @@ paths:
       operationId: removeDeviceAgent
       summary: Remove the agent binding (remote shutdown no longer possible)
       description: Idempotent for a device that exists but has no binding (`204`).
-      security:
-        - bearerAuth: [admin]
       responses:
         "204": { description: Binding removed (or none existed) }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
 
@@ -244,18 +235,20 @@ paths:
     post:
       tags: [devices, commands]
       operationId: wakeDevice
-      summary: Send Wake-on-LAN (asynchronous)
+      summary: Send Wake-on-LAN (asynchronous, idempotent)
       description: |
-        Returns the created command, or the already active wake command for this device (`202`
-        either way). The command is `pending`, then `sent` once the magic packet left; there is no
-        `acknowledged` step. It becomes `completed` when the monitor sees the device online before
-        `deadline_at` (default 180 s) and `timed_out` otherwise.
+        Returns a `wake` command (`202`). Idempotent: if a wake command is already active for this
+        device that command is returned, and if the device is already `online` the command completes
+        immediately without sending a packet. Neither case is an error. A command of the other type
+        (shutdown) is independent and does not affect this one.
 
-        `409 Conflict` when a precondition is unmet; today that is a device without `mac_address`.
-        The `error.message` says which. (Behaviour for a device that is already `online` or has an
-        opposite command in progress is not yet decided; see the backlog.)
-      security:
-        - bearerAuth: [admin]
+        The command is `pending`, then `sent` once the magic packet left (a send failure is reported
+        at once as `failed`); there is no `acknowledged` step. It becomes `completed` when the
+        monitor sees the device online before `deadline_at` (default 180 s) and `timed_out`
+        otherwise.
+
+        `409 Conflict` only when the request cannot work at all: the device has no `mac_address`.
+        `429` when this device already received a wake/shutdown request less than 1 s ago.
       responses:
         "202":
           description: Wake command accepted (not the same as "device powered on")
@@ -263,9 +256,9 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Command" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/v1/devices/{id}/shutdown:
     parameters:
@@ -273,20 +266,22 @@ paths:
     post:
       tags: [devices, commands]
       operationId: shutdownDevice
-      summary: Request a signed shutdown via the device's agent (asynchronous)
+      summary: Request a signed shutdown via the device's agent (asynchronous, idempotent)
       description: |
-        Returns the created command, or the already active shutdown command for this device.
+        Returns a `shutdown` command (`202`). Idempotent: if a shutdown command is already active for
+        this device that command is returned, and if the device is already `offline` the command
+        completes immediately without contacting the agent. Neither case is an error. A command of
+        the other type (wake) is independent and does not affect this one.
+
         Lifecycle: `pending` → `sent` (request signed and delivered) → `acknowledged` (the agent
         accepted it) → `completed` (the monitor saw the device go offline before `deadline_at`,
         default 120 s). `failed` when dispatch fails or the agent rejects the command (see
-        `error_code` on `Command`); `timed_out` when the deadline passes first.
+        `error_code` on `Command`); dispatch is one short attempt, so an unreachable agent fails
+        within seconds. `timed_out` when the deadline passes first.
 
-        `409 Conflict` when a precondition is unmet; today that is a device without an agent
-        binding. The `error.message` says which. (Behaviour for a device that is already `offline`
-        or has an opposite command in progress is not yet decided; see the backlog.) Audited in
-        `audit_log`.
-      security:
-        - bearerAuth: [admin]
+        `409 Conflict` only when the request cannot work at all: the device has no agent binding.
+        `429` when this device already received a wake/shutdown request less than 1 s ago.
+        Audited in `audit_log`.
       responses:
         "202":
           description: Shutdown command accepted
@@ -294,9 +289,9 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Command" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/v1/devices/{id}/probe:
     parameters:
@@ -406,8 +401,6 @@ paths:
       tags: [system]
       operationId: getControllerKey
       summary: Public signing key to paste into an agent's trusted_controllers
-      security:
-        - bearerAuth: [admin]
       responses:
         "200":
           description: Active controller public key
@@ -415,15 +408,12 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ControllerKey" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/v1/ddns:
     get:
       tags: [ddns]
       operationId: listDdnsConfigs
       summary: List DDNS configurations
-      security:
-        - bearerAuth: [admin]
       responses:
         "200":
           description: DDNS configs
@@ -437,13 +427,10 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/DdnsConfig" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
     post:
       tags: [ddns]
       operationId: createDdnsConfig
       summary: Add a DDNS configuration
-      security:
-        - bearerAuth: [admin]
       requestBody:
         required: true
         content:
@@ -457,7 +444,61 @@ paths:
               schema: { $ref: "#/components/schemas/DdnsConfig" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/ddns/cloudflare/zones:
+    post:
+      tags: [ddns]
+      operationId: listCloudflareZones
+      summary: List the Cloudflare zones a token can see
+      description: |
+        Feeds the zone dropdown of the DDNS form, which is the only way to pick a zone: a token that
+        may edit DNS can also read it, so nothing is typed by hand. It is a `POST` only so that the
+        token travels in the body (never in a URL or an access log); it changes nothing. The token
+        is not stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CloudflareLookup" }
+      responses:
+        "200":
+          description: Zones
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CloudflareZoneList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/BadGateway" }
+
+  /api/v1/ddns/cloudflare/zones/{zone_id}/records:
+    parameters:
+      - name: zone_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      tags: [ddns]
+      operationId: listCloudflareRecords
+      summary: List the A/AAAA records of a Cloudflare zone
+      description: |
+        Feeds the record dropdown of the DDNS form (same body and reasons as `listCloudflareZones`).
+        `404` when `config_id` is unknown.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CloudflareLookup" }
+      responses:
+        "200":
+          description: Records
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CloudflareRecordList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/BadGateway" }
 
   /api/v1/ddns/{id}:
     parameters:
@@ -466,8 +507,6 @@ paths:
       tags: [ddns]
       operationId: updateDdnsConfig
       summary: Update a DDNS configuration (partial)
-      security:
-        - bearerAuth: [admin]
       requestBody:
         required: true
         content:
@@ -481,18 +520,14 @@ paths:
               schema: { $ref: "#/components/schemas/DdnsConfig" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [ddns]
       operationId: deleteDdnsConfig
       summary: Delete a DDNS configuration
-      security:
-        - bearerAuth: [admin]
       responses:
         "204": { description: Deleted }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/v1/ddns/{id}/sync:
@@ -502,8 +537,6 @@ paths:
       tags: [ddns]
       operationId: syncDdnsConfig
       summary: Synchronise one DDNS record now
-      security:
-        - bearerAuth: [admin]
       responses:
         "200":
           description: Sync result
@@ -511,7 +544,6 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DdnsSyncResult" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
 components:
@@ -553,11 +585,6 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
-    Forbidden:
-      description: Insufficient role
-      content:
-        application/json:
-          schema: { $ref: "#/components/schemas/Error" }
     NotFound:
       description: Not found
       content:
@@ -569,7 +596,16 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     TooManyRequests:
-      description: Rate limited
+      description: Rate limited (code `rate_limited`); retry after the `Retry-After` header (seconds).
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    BadGateway:
+      description: Cloudflare rejected or failed the request (code `cloudflare_error`); `error.message` carries Cloudflare's reason.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -606,17 +642,12 @@ components:
           type: object
           additionalProperties: { type: string }
 
-    Role:
-      type: string
-      enum: [admin, viewer]
-
     User:
       type: object
-      required: [id, username, role]
+      required: [id, username]
       properties:
         id: { type: string, format: uuid }
         username: { type: string }
-        role: { $ref: "#/components/schemas/Role" }
 
     LoginRequest:
       type: object
@@ -657,6 +688,16 @@ components:
         agent_id: { type: string, format: uuid }
         port: { type: integer, minimum: 1, maximum: 65535, default: 9750 }
         scheme: { type: string, enum: [http, https], default: http }
+        status:
+          type: string
+          readOnly: true
+          description: |
+            Reachability of the agent as seen by the Controller's dispatcher: `ready` (last contact
+            succeeded), `unreachable` (last contact failed) or `unknown` (never contacted). Absent
+            until the dispatcher reports it; clients must then treat it as `unknown`.
+          enum: [ready, unreachable, unknown]
+        version: { type: string, readOnly: true, description: Agent version reported on the last successful contact. }
+        last_ok_at: { type: string, format: date-time, readOnly: true, description: Last successful contact with the agent. }
 
     DeviceType:
       type: string
@@ -913,11 +954,12 @@ components:
 
     DdnsConfig:
       type: object
-      required: [id, name, zone_id, record_name, record_type, proxied, ttl, interval_seconds, enabled, has_api_token, created_at, updated_at]
+      required: [id, name, zone_id, record_id, record_name, record_type, proxied, ttl, interval_seconds, enabled, has_api_token, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
         zone_id: { type: string }
+        record_id: { type: string, description: Cloudflare record id, chosen from the record lookup when the configuration was created. }
         record_name: { type: string, example: home.example.com }
         record_type: { $ref: "#/components/schemas/DnsRecordType" }
         proxied: { type: boolean }
@@ -937,10 +979,11 @@ components:
 
     DdnsConfigCreate:
       type: object
-      required: [name, zone_id, record_name, record_type, api_token]
+      required: [name, zone_id, record_id, record_name, record_type, api_token]
       properties:
         name: { type: string, minLength: 1, maxLength: 100 }
         zone_id: { type: string, minLength: 1 }
+        record_id: { type: string, minLength: 1, description: "Record picked with `listCloudflareRecords`. `record_name`, `record_type`, `proxied` and `ttl` are copied from that record by the client; the Controller does not look records up by name." }
         record_name: { type: string, minLength: 1, maxLength: 253 }
         record_type: { $ref: "#/components/schemas/DnsRecordType" }
         proxied: { type: boolean, default: false }
@@ -954,6 +997,7 @@ components:
       properties:
         name: { type: string, minLength: 1, maxLength: 100 }
         zone_id: { type: string, minLength: 1 }
+        record_id: { type: string, minLength: 1, description: "Required together with `zone_id` and `record_name` when the target record changes; changing `zone_id` without `record_id` is `400`." }
         record_name: { type: string, minLength: 1, maxLength: 253 }
         record_type: { $ref: "#/components/schemas/DnsRecordType" }
         proxied: { type: boolean }
@@ -961,6 +1005,52 @@ components:
         interval_seconds: { type: integer, minimum: 60, maximum: 86400 }
         enabled: { type: boolean }
         api_token: { type: string, writeOnly: true }
+
+    CloudflareLookup:
+      type: object
+      description: |
+        Credentials for a Cloudflare lookup: give **exactly one** of `api_token` (a token the user is
+        typing into the form, not yet saved) or `config_id` (reuse the sealed token of an existing
+        DDNS configuration). Neither or both: `400`.
+      properties:
+        api_token: { type: string, writeOnly: true, format: password }
+        config_id: { type: string, format: uuid }
+
+    CloudflareZone:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string, example: example.com }
+
+    CloudflareZoneList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          description: Zones the token can see, ordered by `name`.
+          items: { $ref: "#/components/schemas/CloudflareZone" }
+
+    CloudflareRecord:
+      type: object
+      required: [id, name, type, content, proxied, ttl]
+      properties:
+        id: { type: string }
+        name: { type: string, example: home.example.com }
+        type: { $ref: "#/components/schemas/DnsRecordType" }
+        content: { type: string, description: Current value (an IP address). }
+        proxied: { type: boolean }
+        ttl: { type: integer, description: "1 = automatic" }
+
+    CloudflareRecordList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          description: "`A` and `AAAA` records of the zone, ordered by `name`."
+          items: { $ref: "#/components/schemas/CloudflareRecord" }
 
     DdnsSyncResult:
       type: object

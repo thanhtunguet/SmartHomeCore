@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | [`BRIEF.md`](../../BRIEF.md) (Technical Brief v0.1, Vietnamese) |
-| Last reviewed | 2026-11-12 |
+| Last reviewed | 2026-11-14 |
 | Owner | Project maintainers |
 
 This document turns the brief into the project's requirements baseline. It records which brief
@@ -56,7 +56,7 @@ One build supports both roles; configuration selects `controller`, `agent` or `b
 | Wake-on-LAN | **Partial.** Packet library done; API and command flow pending | Phase 2 |
 | Secure shutdown Agent on Linux | **Implemented** (agent side); Controller dispatch pending | [shutdown-agent.md](shutdown-agent.md) |
 | SQLite | **Implemented** | [storage-and-secrets.md](storage-and-secrets.md) |
-| JWT authentication | **Partial.** Role policy enforced; token issuing/verification pending | [http-api.md](http-api.md) |
+| JWT authentication | **Partial.** Authentication enforced, no roles (ADR-011); token issuing/verification pending | [http-api.md](http-api.md) |
 | Cloudflare DDNS | **Planned** | Phase 4 |
 | Swagger UI at `/api/docs` | **Implemented** | [http-api.md](http-api.md) |
 | Static file serving | **Implemented** (UI embedded via `make build-full`; placeholder otherwise) | [http-api.md](http-api.md), [web-ui.md](web-ui.md) |
@@ -232,13 +232,13 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 
 | # | Brief point | Status | Ref |
 |---|-------------|--------|-----|
-| 6.1 | Public API: JWT + roles | Partial | REQ-API-007, REQ-API-008 |
+| 6.1 | Public API: JWT + roles | Partial; **roles dropped** (ADR-011) | REQ-API-007, REQ-API-008 |
 | 6.2 | Agent listener: signature + allowlist only | Implemented | REQ-AG-* |
 | 6.3 | Swagger UI grants no permission | Implemented | REQ-API-003 |
 | 6.4 | Cloudflare client with scoped token | Planned | Phase 4 |
 | 6.5 | Never expose the Agent to the Internet; prefer VPN | Documented (`deploy/README.md`, config comments) | REQ-AG-012 |
 | 6.6 | JWT secret ≠ Agent secret | Implemented by design (separate keys; JWT key not created yet) | REQ-SEC-005 |
-| 6.7 | Shutdown requires admin and writes audit log | Partial (admin enforced by policy; `audit_log` table ready; writing pending) | REQ-API-008 |
+| 6.7 | Shutdown requires admin and writes audit log | **Changed:** no roles (ADR-011), any authenticated user; `audit_log` table ready, writing pending | REQ-API-008 |
 | 6.8 | Private keys and Cloudflare tokens protected at rest | Partial (sealer implemented; not yet wired to keys/tokens) | REQ-SEC-002 |
 | 6.9 | Acknowledge before executing shutdown | Implemented | REQ-AG-009 |
 | 6.10 | Agent only runs predefined commands | Implemented | REQ-AG-005 |

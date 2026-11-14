@@ -32,6 +32,17 @@ ui-build: ui-install ## Build the frontend into web/static (embedded by `make bu
 ui-lint: ## Type-check the frontend
 	cd $(UI_DIR) && npm run lint
 
+.PHONY: ui-test
+ui-test: ui-install ## Frontend unit and contract tests (no Controller needed)
+	cd $(UI_DIR) && npm test
+
+.PHONY: ui-check-api
+ui-check-api: ui-install ## Fail if the UI's generated wire types are stale against api/openapi.yaml
+	cd $(UI_DIR) && npm run check:api
+
+.PHONY: ui-check
+ui-check: ui-lint ui-test ui-check-api ## All frontend checks: type-check, tests, generated types
+
 .PHONY: ui-dev
 ui-dev: ## Frontend dev server on :3000, proxying /api to the Controller on :8080 (run `make run` too)
 	cd $(UI_DIR) && npm run dev

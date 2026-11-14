@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1 |
-| Last reviewed | 2026-11-12 |
+| Last reviewed | 2026-11-14 |
 | Requirements | [requirements/overview.md](../requirements/overview.md) |
 | Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs) |
 | API contract | [api/openapi.yaml](../../api/openapi.yaml) (source of truth) |
@@ -133,7 +133,7 @@ internal/
     gen/                 oapi-codegen output (do not edit)
     middleware/
     handlers/
-  auth/                  users, password hashing, JWT, refresh tokens, roles
+  auth/                  users, password hashing, JWT, refresh tokens (no roles, ADR-011)
   devices/               device model, validation, repository
   monitoring/            TCP probe, hysteresis, scheduler job, status history
   wol/                   magic packet build/send, MAC parsing, broadcast resolution
@@ -307,6 +307,12 @@ secret material belongs to the Controller, not the device.
 - Terminal states: `completed`, `failed`, `timed_out` (the brief's “unknown”; renamed to avoid
   clashing with device status `unknown`).
 - Default deadlines: wake 180 s, shutdown 120 s (configurable).
+- Commands are **idempotent and fail fast** ([ADR-012](decisions.md#adr-012--idempotent-fail-fast-power-commands-with-a-per-device-throttle)):
+  an active command of the same type is returned instead of a new one; a device already in the
+  target state gets a command that completes immediately; a dispatch error is `failed` within
+  seconds. Wake and shutdown of one device do not block each other.
+- At most one wake/shutdown request per device per second (all users, both types): `429 rate_limited`
+  from `middleware.DeviceThrottle`, mirrored by the UI.
 - `wake` skips `acknowledged` (no agent involved).
 - Transitions are validated by `commands.CanTransition`; illegal transitions are programming errors.
 
@@ -320,18 +326,18 @@ Namespace `/api/v1`; full contract in `api/openapi.yaml`. Summary (brief §4, pl
 |--------|------|------|
 | POST | `/api/v1/auth/login` · `/auth/refresh` · ✚`/auth/logout` | public / public / user |
 | GET | ✚`/api/v1/auth/me` | user |
-| GET/POST | `/api/v1/devices` | user / admin |
-| GET/PATCH/DELETE | `/api/v1/devices/{id}` | user / admin / admin |
-| ✚DELETE | `/api/v1/devices/{id}/agent` | admin |
-| POST | `/api/v1/devices/{id}/wake` | admin (✚ viewers can wake if `allow_viewer_wake`) |
-| POST | `/api/v1/devices/{id}/shutdown` | **admin** |
+| GET/POST | `/api/v1/devices` | user |
+| GET/PATCH/DELETE | `/api/v1/devices/{id}` | user |
+| ✚DELETE | `/api/v1/devices/{id}/agent` | user |
+| POST | `/api/v1/devices/{id}/wake` · `/shutdown` | user; idempotent, 1 request per device per second (`429`) |
 | POST | `/api/v1/devices/{id}/probe` | user |
 | GET | `/api/v1/devices/{id}/history` | user |
 | GET | `/api/v1/commands` · ✚`/commands/{id}` | user |
-| GET | `/api/v1/system/metrics` · ✚`/system/info` | user |
-| GET/POST | `/api/v1/ddns` | admin |
-| ✚PATCH/DELETE | `/api/v1/ddns/{id}` | admin |
-| POST | `/api/v1/ddns/{id}/sync` | admin |
+| GET | `/api/v1/system/metrics` · ✚`/system/info` · ✚`/system/controller-key` | user |
+| GET/POST | `/api/v1/ddns` | user |
+| ✚PATCH/DELETE | `/api/v1/ddns/{id}` | user |
+| POST | `/api/v1/ddns/{id}/sync` | user |
+| ✚POST | `/api/v1/ddns/cloudflare/zones` · `/ddns/cloudflare/zones/{zone_id}/records` | user; read-only lookups for the form dropdowns (`POST` so the token stays out of URLs) |
 | GET | `/healthz`, `/readyz`, `/api/openapi.json`, `/api/docs` | public |
 
 Pagination: `?limit=&cursor=` (cursor = opaque, UUIDv7-based), no total count. Order is fixed:
@@ -345,7 +351,7 @@ is removed with `DELETE /devices/{id}/agent`.
 
 | Zone | AuthN | AuthZ |
 |------|-------|-------|
-| REST API | JWT (HS256, 15 min) + rotating refresh token (30 d) | roles `admin`, `viewer` |
+| REST API | JWT (HS256, 15 min) + rotating refresh token (30 d) | none: every authenticated user is equal (ADR-011) |
 | Agent listener | Ed25519 signature by a trusted Controller key | action allowlist |
 | Swagger UI | none (static); API calls still require JWT | grants nothing |
 | Cloudflare | scoped API token | DNS edit on one zone |
@@ -355,9 +361,10 @@ Principles:
 2. Agent listener is LAN-only; remote access via VPN (WireGuard/Tailscale), never port-forwarded.
 3. Separate keys: JWT signing key ≠ Controller signing key ≠ master key.
 4. No plaintext secrets in the DB; no secrets in API responses or logs.
-5. Shutdown requires `admin` and writes `audit_log`.
-6. First run: if there are no users, an `admin` is created from `HOMECORE_ADMIN_PASSWORD` or a random
-   password printed **once** to the log (Android host displays it).
+5. Shutdown writes `audit_log` (with the acting user). Wake/shutdown are throttled per device (ADR-012).
+6. Accounts are created and re-passworded with the `homecore user add|passwd` command (Phase 1b);
+   there is no default account and no password in the log. Android: the host app calls the same
+   code through `mobile` (to be designed with Phase 5).
 7. Login is rate-limited per IP; generic error messages; constant-time password verification.
 8. Agent runs unprivileged; power actions via polkit (Linux) / `SeShutdownPrivilege` (Windows).
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"slices"
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -18,10 +17,9 @@ import (
 // SecuritySchemeName is the only security scheme the API uses.
 const SecuritySchemeName = "bearerAuth"
 
-// Requirement is the access rule of one operation.
+// Requirement is the access rule of one operation: public, or any authenticated user.
 type Requirement struct {
 	Public bool
-	Roles  []auth.Role // empty = any authenticated user
 }
 
 // Policy maps "METHOD /route/{pattern}" to its Requirement. It is derived from the OpenAPI spec,
@@ -29,7 +27,8 @@ type Requirement struct {
 type Policy map[string]Requirement
 
 // PolicyFromSpec builds a Policy from the spec's global and per-operation security requirements.
-// Scopes on bearerAuth are interpreted as required roles (e.g. `bearerAuth: [admin]`).
+// There are no roles (ADR-011): bearerAuth must not carry scopes, so a stray `[admin]` aborts
+// startup instead of silently granting everyone access.
 func PolicyFromSpec(spec *openapi3.T) (Policy, error) {
 	p := Policy{}
 	for path, item := range spec.Paths.Map() {
@@ -50,12 +49,8 @@ func PolicyFromSpec(spec *openapi3.T) (Policy, error) {
 					if name != SecuritySchemeName {
 						return nil, fmt.Errorf("%s %s: unsupported security scheme %q", method, path, name)
 					}
-					for _, s := range scopes {
-						role := auth.Role(s)
-						if role != auth.RoleAdmin && role != auth.RoleViewer {
-							return nil, fmt.Errorf("%s %s: unknown role %q", method, path, s)
-						}
-						r.Roles = append(r.Roles, role)
+					if len(scopes) > 0 {
+						return nil, fmt.Errorf("%s %s: scopes %v on %s are not supported (no roles)", method, path, scopes, name)
 					}
 				}
 			}
@@ -97,17 +92,9 @@ func Authorize(policy Policy, authn auth.Authenticator, log *slog.Logger) func(h
 				httpx.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or expired token")
 				return
 			}
-			if len(req.Roles) > 0 && !hasAnyRole(principal, req.Roles) {
-				httpx.WriteError(w, http.StatusForbidden, "forbidden", "insufficient role")
-				return
-			}
 			next.ServeHTTP(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
 		})
 	}
-}
-
-func hasAnyRole(p auth.Principal, roles []auth.Role) bool {
-	return slices.ContainsFunc(roles, p.HasRole)
 }
 
 func bearerToken(h string) (string, bool) {

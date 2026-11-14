@@ -6,11 +6,11 @@
 | Code | `frontend/` (git submodule, HomeCoreUI: React 19, Vite 8, Tailwind 4), `web/embed.go`, `web/placeholder/`, `Makefile` (`ui-*`, `build-full`) |
 | Design | [architecture §6.1, §10](../design/architecture.md), [ADR-009](../design/decisions.md#adr-009--frontend-as-a-git-submodule-embedded-into-the-binary), [ADR-010](../design/decisions.md#adr-010--ui-session-tokens-in-localstorage-and-polling-instead-of-push) |
 | Report | [frontend-api-integration.md](../reports/frontend-api-integration.md) (gaps and inconsistencies, IDs `GAP-*`, `INC-*`) |
-| Last updated | 2026-11-12 (second pass: server-side device type/OS, `/system/info`, viewer gating) |
-| Status | UI wired to the REST contract and smoke-tested against a spec mock (first pass; second pass type-checked and built only); **not yet end-to-end against the real Controller** (business endpoints return `501`) |
+| Last updated | 2026-11-14 (third pass: no roles, 1 s device guard, DDNS dropdowns, generated types, unit tests) |
+| Status | UI wired to the REST contract and smoke-tested against a spec mock (first pass; second and third pass covered by type-check, build and unit tests only, not run in a browser); **not yet end-to-end against the real Controller** (business endpoints return `501`) |
 
 "Smoke test" below means the headless-Chromium run against a throwaway mock of `api/openapi.yaml`,
-plus the real Controller for health, `501` and `401`. Neither is in the repository (REQ-UI-016).
+plus the real Controller for health, `501` and `401`. Neither is in the repository. The unit and contract tests of REQ-UI-016 are.
 
 ## Delivery
 
@@ -28,17 +28,17 @@ plus the real Controller for health, `501` and `401`. Neither is in the reposito
 | REQ-UI-005 | Nothing but the login screen renders until a session exists. Login uses `POST /auth/login`; `401` → "invalid credentials", `429` → retry notice, `501` → "sign-in is not implemented on this Controller yet". | Implemented | Smoke test (mock: all; real Controller: `501`) |
 | REQ-UI-006 | The access token is refreshed silently before expiry and once on a `401`; the rotated refresh token replaces the old one. A failed refresh returns to the login screen. Refreshes are serialised across tabs (Web Locks when available) and the session is shared through `localStorage`. | Implemented | Smoke test (3 refreshes in about 60 s with 20 s tokens; reload keeps session). Plain-HTTP fallback and multi-tab race untested |
 | REQ-UI-007 | Logout calls `POST /auth/logout` and clears local session data. | Implemented | Smoke test (mock) |
-| REQ-UI-008 | `viewer` sessions cannot create, edit, delete, sync DDNS or open DDNS data, and do not see wake/shutdown actions (cards, table, detail sheet, dashboard, command palette); the UI hides or refuses those actions. The server remains the enforcement point. | Implemented | Smoke test (mock viewer) for the CRUD/DDNS part; hiding of wake/shutdown only type-checked and built, see REQ-UI-017 |
+| REQ-UI-008 | **Removed** (2026-11-14, ADR-011): there are no roles, so nothing is hidden or refused by account type. Every logged-in user sees and may use every action; the UI has no `admin`/`viewer` notion. | Removed | — |
 
 ## Features
 
 | ID | Requirement | Status | Verified by |
 |----|-------------|--------|-------------|
-| REQ-UI-009 | Devices: list (all cursor pages followed), create, edit, delete, manual probe against `/devices*`. Fields and limits follow the spec (MAC optional, interval 5–3600 s, timeout 100–10000 ms). Device type and OS are stored by the Controller (`device_type`, `os`); values kept in `localStorage` by earlier builds are pushed once by an admin session and then deleted. Removing the shutdown binding calls `DELETE /devices/{id}/agent`. The last probe latency comes from `last_latency_ms` unless a fresher probe was made in the session. | Changed | Smoke test (mock) for the unchanged parts; the new fields were only type-checked and built |
-| REQ-UI-010 | Wake: `POST /devices/{id}/wake` then poll `GET /commands/{id}` until terminal; `completed` = online, `timed_out` = packet sent but host not seen online, `failed` = error text; `409`/`403` messages are shown. Requests return immediately (`202`); the UI never blocks on the machine. | Implemented | Smoke test (mock: completed, timed out) |
+| REQ-UI-009 | Devices: list (all cursor pages followed), create, edit, delete, manual probe against `/devices*`. Fields and limits follow the spec (MAC optional, interval 5–3600 s, timeout 100–10000 ms). Device type and OS are stored by the Controller (`device_type`, `os`); values kept in `localStorage` by earlier builds are pushed once by any signed-in session and then deleted. Removing the shutdown binding calls `DELETE /devices/{id}/agent`. The last probe latency comes from `last_latency_ms` unless a fresher probe was made in the session. | Changed | Smoke test (mock) for the unchanged parts; the new fields were only type-checked and built |
+| REQ-UI-010 | Wake: `POST /devices/{id}/wake` then poll `GET /commands/{id}` until terminal; `completed` = online, `timed_out` = packet sent but host not seen online, `failed` = error text; `409` (device has no MAC) and other error messages are shown. Repeating the action or waking an already-online device is not an error: a command that is already terminal on the first read is reported as "already online". Requests return immediately (`202`); the UI never blocks on the machine. | Implemented | Smoke test (mock: completed, timed out) |
 | REQ-UI-011 | Shutdown: confirmation, `POST /devices/{id}/shutdown`, follow the command through `sent`, `acknowledged`, `completed` (offline verified) or `failed`. The shutdown form binds an Agent (UUID, port, scheme) and shows the Controller Ed25519 public key; no per-device shared secret exists in the UI. | Implemented | Smoke test (mock: offline verified, `409` in form) |
 | REQ-UI-012 | Dashboard, Devices, Activity, System and Settings read live API data and show "—" for figures the API does not return. No mock data ships in the bundle. | Implemented | Smoke test (mock, real Controller for `/healthz`) |
-| REQ-UI-013 | DDNS screen manages `/ddns` records (admin only): create, edit, enable/disable, delete, manual sync; the API token is write-only and never displayed. Zone ID and record name are typed manually (GAP-API-02). | Implemented | Smoke test (mock: create and sync) |
+| REQ-UI-013 | DDNS screen manages `/ddns` records for every user: create, edit, enable/disable, delete, manual sync; the API token is write-only and never displayed. **Zone and record are only ever chosen from dropdowns** filled by `POST /ddns/cloudflare/zones` and `.../zones/{zone_id}/records` (token typed in the form, or `config_id` when editing); there is no manual entry. Save stays disabled until both are chosen; a failed lookup (including `501` until Phase 4) shows the server message and a Retry. Editing an existing record shows its current zone/record read-only; "Change" reloads the dropdowns, and a change always sends `zone_id`, `record_id`, `record_name`, `record_type` together. | Changed | Smoke test (mock) for create and sync; dropdowns: helper logic unit-tested, screen only type-checked and built |
 | REQ-UI-014 | Activity lists the Controller's command history plus session-local events; reloading drops the session-local events (GAP-API-05). | Partial | Smoke test (mock) |
 
 ## Behaviour and quality
@@ -46,8 +46,10 @@ plus the real Controller for health, `501` and `401`. Neither is in the reposito
 | ID | Requirement | Status | Verified by |
 |----|-------------|--------|-------------|
 | REQ-UI-015 | Data refreshes by polling, never by WebSocket/SSE: devices 10 s, commands 15 s, metrics 10 s, DDNS 30 s, health 60 s. Polling pauses in hidden tabs and stops on logout. Errors show a status banner and keep the last data. | Implemented | Smoke test (mock) |
-| REQ-UI-016 | Frontend automated tests and CI type-check/build. | **Planned** | — (GAP-INF-06, GAP-INF-07) |
+| REQ-UI-016 | Frontend wire types are **generated** from `api/openapi.yaml` (`npm run gen:api`, output `src/api/generated/schema.d.ts`; `openapi-typescript` runs in the private workspace `tools/apigen` with TypeScript 5 because the UI uses TypeScript 7, which has no compiler API). `npm run check:api` fails when the committed file is stale. Vitest suites (110 tests: mappers, API client with mocked `fetch`, command polling, per-device cooldown, endpoint wrappers, and a contract test that every endpoint the UI calls exists in the spec with the same method and path) need no Controller. `make ui-check` runs type-check, tests and the staleness check. | Implemented (React components and flows are not covered: no jsdom or browser tests; no CI pipeline yet) | `make ui-check` (see changelog) |
 | REQ-UI-017 | Wake and shutdown buttons are disabled while the device's `power_transition` is `waking` or `shutting_down`. Settings shows the read-only effective server configuration from `GET /system/info` when available. System and DDNS views show the optional metrics and `detected_ip`/`dns_value` fields when the Controller reports them and "—" otherwise. | Implemented (untested) | `tsc --noEmit` and `make ui-build` only; not exercised in a browser |
+| REQ-UI-018 | Wake/shutdown guard: at most one request per device per second, shared by both actions and by all users (ADR-012). A second call inside the window is dropped client-side with a neutral toast and no request; the device's wake/shutdown buttons are disabled for that second (cards, table, detail sheet, command palette, shutdown confirm). A server `429` shows the same toast and holds the device for `Retry-After`; it never marks a flow as failed. | Implemented | `cooldown.test.ts`, `client.test.ts` (429); button wiring only type-checked and built |
+| REQ-UI-019 | The detail sheet shows the agent `status`, `version` and last contact from the API when present; when `status` is absent the old inference ("Bound (host online)") is shown and labelled "inferred". | Implemented (untested in a browser) | `mappers.test.ts` (`agentState`) |
 
 ## Known gaps
 
@@ -55,5 +57,5 @@ All tracked, with IDs and suggested fixes, in
 [frontend-api-integration.md](../reports/frontend-api-integration.md). The ones that matter most:
 
 - The Controller implements none of the business endpoints (GAP-BE-01..03); real end-to-end is untested.
-- Agent health and an activity/audit endpoint do not exist server-side (GAP-API-09, 05). Device type/OS and `GET /system/info` do now (REQ-API-015/017).
-- Wire types are hand-written and can drift from `api/openapi.yaml` (GAP-INF-06).
+- Agent health (REQ-API-021) and the Cloudflare lookups (REQ-API-020) are specified but not implemented server-side, so the UI shows the inferred agent state, and DDNS records cannot be created until Phase 4 (the dropdowns have no data). There is no activity/audit endpoint yet (GAP-API-05).
+- The React components, hooks and flows are not covered by automated tests; only the logic behind them is (REQ-UI-016).

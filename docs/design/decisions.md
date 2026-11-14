@@ -162,3 +162,55 @@ the Internet (httpOnly cookie flow). Without a secure context (plain `http://` o
 multi-tab refresh race is only narrowed, so the Controller should tolerate a short reuse grace window
 when it implements refresh rotation (GAP-INF-01). Polling cost grows with open tabs; fine at the
 target scale (< 10 users).
+
+---
+
+## ADR-011 — No roles: every authenticated user is equal
+
+**Context.** The brief (§3.1, §6) and the first design had two roles, `admin` and `viewer`, with
+shutdown, device management and DDNS reserved to `admin`. The system is a small household
+installation; the people who can log in already trust each other and the maintainers asked for
+no permission model (2026-11-14).
+
+**Decision.** Authentication stays mandatory, authorization by role is removed.
+- Any authenticated user may call every `/api/v1` operation. The spec has no scopes on `bearerAuth`;
+  `middleware.PolicyFromSpec` aborts startup if one reappears, so nothing is silently granted.
+- `users` has no `role` column (migration `0003`); `auth.Principal` has no role; the `403 Forbidden`
+  response and the `Role` schema are gone. A route without a policy entry is still denied (`403`, fail closed).
+- Shutdown still writes `audit_log`, with the acting user.
+- Accounts are managed outside the API: `homecore user add|passwd` (Phase 1b). There is no
+  first-run bootstrap with a default or logged password, and no user-management API or UI.
+
+**Consequences.** Any account can shut a machine down and change DDNS records (the Cloudflare token
+stays write-only). Supersedes brief §6.1 ("roles") and §6.7 ("shutdown requires admin"). Revisit
+together with ADR-010 if the Controller is ever exposed beyond the LAN or shared with people who
+should not operate devices.
+
+---
+
+## ADR-012 — Idempotent, fail-fast power commands with a per-device throttle
+
+**Context.** On a LAN a wake or shutdown is answered in milliseconds. The earlier design left open
+what to do when a device is already in the target state or a command is already running (`409`?),
+used a 5 s timeout with three retries for the agent request, and had no protection against button
+mashing.
+
+**Decision.**
+- **Idempotent.** Sending the same command again behaves like sending it once and is never an
+  error. An active command of the same type is returned (`202`); a device already `online` (wake) or
+  `offline` (shutdown) gets a command that completes at once, without a packet or an agent request.
+  A wake and a shutdown for one device are independent (the unique index is per `(device_id, type)`).
+- **Fail fast.** `409` remains only for a request that can never work (wake without a MAC, shutdown
+  without an agent binding). A dispatch problem is reported as `failed` immediately: one attempt to
+  the agent with a short timeout (2 s) and at most one immediate retry with the same `command_id`.
+  The long `deadline_at` (wake 180 s, shutdown 120 s) is unchanged; it bounds how long the *machine*
+  takes to boot or stop, not the LAN round trip.
+- **Throttle.** At most one wake/shutdown request per device per second, counted over all users and
+  both types. Excess requests get `429 rate_limited` with `Retry-After`. It is enforced by the
+  backend (`middleware.DeviceThrottle`, after authentication, in memory) and again by the UI, which
+  does not send the request and disables that device's buttons for the second.
+
+**Consequences.** Clients need no special handling for "already done". The throttle state is lost on
+restart, which is acceptable. A refresh of the agent-protocol retry policy
+([agent-protocol §5](agent-protocol.md#5-controller-behaviour)) follows from this ADR.
+

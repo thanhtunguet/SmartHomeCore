@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | Brief §7 (phases), §8 (MVP); [architecture](../design/architecture.md) |
-| Last updated | 2026-11-12 (second pass) |
+| Last updated | 2026-11-14 (decisions: no roles, idempotent commands + throttle, Cloudflare lookups, user CLI) |
 
 Legend: `[x]` done and verified · `[~]` partially done · `[ ]` not started.
 Tick items in the same change that completes them, and add a changelog entry.
@@ -60,7 +60,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [ ] JWT signing key created and stored sealed in `system_settings`
 - [ ] `auth.JWT` Authenticator (HS256, 15 min access token) replacing `RejectAll`
 - [ ] Refresh-token rotation with family reuse detection and a short reuse **grace window** (about 10 s: a token presented again within it returns the already issued pair instead of revoking the family; the UI cannot serialise refreshes across tabs on plain HTTP, GAP-INF-01)
-- [ ] First-run admin bootstrap (`HOMECORE_ADMIN_PASSWORD` or a random password logged once)
+- [ ] `homecore user add|passwd` command (works on the DB file, no running Controller needed; prompts for or reads the password from stdin) replacing the first-run bootstrap: no default account, nothing logged. Then remove `controller.auth.bootstrap_admin_user` from config and `HOMECORE_ADMIN_PASSWORD` from the docs (ADR-011)
 - [ ] Handlers: `login`, `refresh`, `logout`, `me`
 - [ ] `audit_log` writes for login success/failure
 - [ ] Tests: login rate limit (429), token expiry, refresh reuse → family revoked, reuse inside the grace window → same pair
@@ -74,8 +74,10 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [ ] Devices repository + service (validation, `409` on duplicate name)
 - [ ] Handlers: list/create/get/update/delete devices, probe, history (cursor pagination); honour `device_type`/`os`, clear-with-`""` on `PATCH`, and the fixed list order (REQ-API-017)
 - [x] Migration `0002`: `device_type`, `os`, `last_latency_ms` on `devices`
+- [x] Per-device wake/shutdown throttle, 1 request per second for all users (`middleware.DeviceThrottle`, REQ-API-018)
+- [x] Migration `0003`: `users.role` dropped (ADR-011)
 - [ ] Monitor component: tick, due devices, worker pool, jitter, persist transitions, write `last_latency_ms`
-- [ ] Commands repository + dispatcher; `wake` endpoint and wake verification via monitor
+- [ ] Commands repository + dispatcher; `wake` endpoint and wake verification via monitor. Idempotent: return the active wake command; if the device is already online, complete at once (REQ-API-019)
 - [ ] `power_transition` derived in device responses
 - [ ] Commands list/get handlers
 - [ ] Retention job (`retention_days`)
@@ -89,9 +91,11 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [x] systemd units and polkit rule (`deploy/`)
 - [x] `devtools keygen|send`
 - [ ] Controller key management: generate on first run into `controller_keys` (sealed); `GET /api/v1/system/controller-key`
-- [ ] Controller dispatcher for `shutdown`: signed POST, retries with the same `command_id`, map agent error codes into the command
+- [ ] Controller dispatcher for `shutdown`: signed POST, 2 s timeout, at most one immediate retry with the same `command_id` (fail fast, ADR-012), map agent error codes into the command; already offline → complete without contacting the agent
 - [ ] Device ↔ agent binding in the device API, including `DELETE /devices/{id}/agent`
-- [ ] `audit_log` for shutdown requests
+- [ ] `audit_log` for shutdown requests (with the acting user)
+- [ ] `AgentBinding.status`, `version`, `last_ok_at` filled from the dispatcher's last contact (REQ-API-021, GAP-API-09)
+- [ ] `GET /api/v1/activity` (cursor list fed by `audit_log` and command history). Cheap once the audit writes exist; what the UI will do with it is not decided yet, so add it to the spec only when it is picked up (GAP-API-05)
 - [ ] Validate systemd + polkit on a real Debian/Ubuntu host
 - [ ] Integration test: `both` mode with a fake `PowerController`
 
@@ -101,6 +105,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [ ] Cloudflare client (`net/http`, no SDK); get/update record
 - [ ] Syncer job with exponential backoff; `ddns_sync_history`
 - [ ] DDNS handlers (CRUD + manual sync); token sealed, never returned
+- [ ] Cloudflare lookups for the form dropdowns: `POST /ddns/cloudflare/zones` and `.../zones/{zone_id}/records` (token from the body or from `config_id`; `502 cloudflare_error`); `record_id` is required and stored in `cf_record_id`; no lookup by name; `PATCH` changing `zone_id` without `record_id` → `400` (REQ-API-020, GAP-API-02)
 - [ ] gopsutil metrics provider; `GET /api/v1/system/metrics`, filling the optional fields (`cpu_cores`, `load_average`, `kernel`, `restricted`, `process.pid/uptime_seconds`)
 - [ ] DDNS state fields `detected_ip`, `dns_value`, `last_checked_at` filled by the syncer
 
@@ -130,12 +135,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 | Tests for CLI flag precedence | REQ-RT-003 gap |
 | Test `/readyz` 503 path and `WithTx` rollback | REQ-API-004, REQ-ST-004 |
 | Re-run the UI against the real Controller as Phases 1b/2/3/4 land (UI is verified only against a mock) | GAP-BE-01..03 |
-| Agent health/version in the API (`agent.status`, `version`, `last_ok_at`) | GAP-API-09 |
-| Cloudflare zone/record listing | GAP-API-02 |
-| Activity/audit endpoint (needs `audit_log` writes) | GAP-API-05 |
-| Decide the `409` cases of wake/shutdown: device already online/offline, opposite command active | GAP-API-10 |
-| Decide `allow_viewer_wake`: honour it (needs a non-static policy) or drop the key and the architecture line | GAP-API-13 |
-| Viewer-visible read-only DDNS summary? | GAP-API-16 |
 | Hostname field in the device form (once hostname-based probing exists) | GAP-API-15 |
-| Generate UI wire types from `api/openapi.yaml`; frontend tests in CI | GAP-INF-06, 07, REQ-UI-016 |
+| Run the frontend checks (`make ui-check`) in CI once a CI pipeline exists | GAP-INF-06, 07, REQ-UI-016 |
+| User management beyond the CLI (list/disable users, UI for changing the password) | GAP-API-14 |
 | Release pipeline must run `make ui-build` before `make cross` | GAP-INF-10 |

@@ -77,7 +77,6 @@ type Auth struct {
 	RefreshTokenTTL    time.Duration `yaml:"refresh_token_ttl"`
 	LoginRatePerMinute int           `yaml:"login_rate_per_minute"`
 	APIRatePerMinute   int           `yaml:"api_rate_per_minute"`
-	AllowViewerWake    bool          `yaml:"allow_viewer_wake"`
 	BootstrapAdminUser string        `yaml:"bootstrap_admin_user"`
 }
 

@@ -30,6 +30,10 @@ import (
 const (
 	maxBodyBytes   = 1 << 20
 	requestTimeout = 30 * time.Second
+
+	// DeviceCommandInterval is the minimum time between two wake/shutdown requests for the same
+	// device, across all users (REQ-API-018).
+	DeviceCommandInterval = time.Second
 )
 
 // Deps are the Controller API dependencies.
@@ -128,8 +132,14 @@ func newRouter(d Deps) (http.Handler, error) {
 	h := handlers.New(d.DB, d.Log)
 	h.Info = handlers.InfoSource{Mode: string(d.Mode), Controller: d.Config}
 	gen.HandlerWithOptions(h, gen.ChiServerOptions{
-		BaseRouter:  r,
-		Middlewares: []gen.MiddlewareFunc{middleware.Authorize(policy, d.Authn, d.Log), middleware.NotImplementedEnvelope},
+		BaseRouter: r,
+		// The wrapper applies these in order, so the last is outermost: a request passes
+		// NotImplementedEnvelope, then Authorize, then the device throttle, then the handler.
+		Middlewares: []gen.MiddlewareFunc{
+			middleware.NewDeviceThrottle(DeviceCommandInterval).Middleware,
+			middleware.Authorize(policy, d.Authn, d.Log),
+			middleware.NotImplementedEnvelope,
+		},
 		ErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) {
 			httpx.WriteError(w, http.StatusBadRequest, "bad_request", err.Error())
 		},
