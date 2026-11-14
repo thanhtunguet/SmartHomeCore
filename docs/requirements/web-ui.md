@@ -6,7 +6,7 @@
 | Code | `frontend/` (git submodule, HomeCoreUI: React 19, Vite 8, Tailwind 4), `web/embed.go`, `web/placeholder/`, `Makefile` (`ui-*`, `build-full`) |
 | Design | [architecture §6.1, §10](../design/architecture.md), [ADR-009](../design/decisions.md#adr-009--frontend-as-a-git-submodule-embedded-into-the-binary), [ADR-010](../design/decisions.md#adr-010--ui-session-tokens-in-localstorage-and-polling-instead-of-push) |
 | Report | [frontend-api-integration.md](../reports/frontend-api-integration.md) (gaps and inconsistencies, IDs `GAP-*`, `INC-*`) |
-| Last updated | 2026-11-14 (network interface and disk display updates; fourth pass: Activity wired to `GET /activity`; third pass: no roles, 1 s device guard, DDNS dropdowns, generated types, unit tests) |
+| Last updated | 2026-11-14 (responsive Activity header; network interface and disk display updates; fourth pass: Activity wired to `GET /activity`; third pass: no roles, 1 s device guard, DDNS dropdowns, generated types, unit tests) |
 | Status | UI wired to the REST contract and smoke-tested against a spec mock (first pass; second and third pass covered by type-check, build and unit tests only, not run in a browser); **not yet end-to-end against the real Controller** (business endpoints return `501`) |
 
 "Smoke test" below means the headless-Chromium run against a throwaway mock of `api/openapi.yaml`,
@@ -54,6 +54,8 @@ plus the real Controller for health, `501` and `401`. Neither is in the reposito
 | REQ-UI-020 | System disk usage shows the percentage, used and total space without displaying the filesystem path inline; when provided, the path is available in the Disk label tooltip. | Implemented | `SystemScreen.test.ts` (static rendering); browser tooltip not yet verified |
 
 | REQ-UI-021 | System local addresses show interface name and IP in separate columns; when a Controller supplies only legacy `local_ips`, the IP remains visible with an unknown interface marker. | Implemented | `SystemScreen.test.ts`, `systemAddresses.test.ts` (static rendering and mapping; no browser test) |
+
+| REQ-UI-022 | Activity header keeps action labels on one line; the action group moves below the title when the available width is insufficient, and its buttons may wrap individually on very narrow screens. | Implemented (untested) | Frontend type-check and production build; responsive browser layout not yet verified |
 
 ## Known gaps
 
