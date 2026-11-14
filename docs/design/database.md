@@ -3,10 +3,10 @@
 | | |
 |---|---|
 | Engine | SQLite 3 (embedded) via `modernc.org/sqlite` (pure Go, [ADR-004](decisions.md#adr-004--sqlite-driver-moderncorgsqlite-everywhere)) |
-| Schema version | `4` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`, `0003_users_no_roles.sql`, `0004_refresh_grace.sql`) |
+| Schema version | `5` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`, `0003_users_no_roles.sql`, `0004_refresh_grace.sql`, `0005_agent_status.sql`) |
 | Owner role | Controller only. The Agent has no database |
 | Requirements | [storage-and-secrets.md](../requirements/storage-and-secrets.md) |
-| Last reviewed | 2026-11-14 (Phase 2: lifecycle, cursors, audit actions) |
+| Last reviewed | 2026-11-14 (Phase 3: migration 0005, agent status columns, controller key writer, audit actions) |
 
 The DDL in `internal/storage/migrations/` is authoritative. This document explains it and must be
 updated in the same change as any new migration.
@@ -141,7 +141,7 @@ active row in `commands`.
 
 ### agent_bindings
 
-Optional 1:1 link from a device to the HomeCore Agent running on it. Holds no secret.
+Optional 1:1 link from a device to the HomeCore Agent running on it. Holds no secret. Migration `0005` added the three status columns, which record what the Controller last learned from the Agent (see [ADR-015](decisions.md)).
 
 | Column | Type | Null | Default | Constraint / note |
 |--------|------|------|---------|-------------------|
@@ -150,11 +150,14 @@ Optional 1:1 link from a device to the HomeCore Agent running on it. Holds no se
 | `port` | INTEGER | no | `9750` | 1–65535 |
 | `scheme` | TEXT | no | `'http'` | `http` \| `https` |
 | `agent_public_key` | BLOB | yes | | reserved for signed acknowledgements (protocol v2) |
+| `status` | TEXT | no | `'unknown'` | `ready` \| `unreachable` \| `unknown` (CHECK). Written by the shutdown Dispatcher and the health job through `RecordAgentContact`; reset to `unknown` (with `version`, `last_ok_at`) only when `agent_id`, `port` or `scheme` changes |
+| `version` | TEXT | no | `''` | Agent version from its last healthz answer |
+| `last_ok_at` | INTEGER | yes | | unix ms of the last answer from the bound agent |
 | `created_at`, `updated_at` | INTEGER | no | | |
 
 ### controller_keys
 
-The Controller's Ed25519 signing keys. Rotation: insert a new key and set `retired_at` on the old one.
+The Controller's Ed25519 signing keys. Written since Phase 3 by `internal/controllerkey` (`LoadOrCreate` inside one transaction on first start or `homecore key show`; the seed is sealed, a unique violation from a concurrent first start is retried and reads the winner). Rotation (not implemented yet): insert a new key and set `retired_at` on the old one.
 
 | Column | Type | Null | Constraint / note |
 |--------|------|------|-------------------|
@@ -209,7 +212,7 @@ Indexes:
 
 ### audit_log
 
-Append-only record of security-relevant actions (login, shutdown, key rotation, config changes). Written by `internal/audit`. Actions today: `auth.login` (`result` `ok`/`failed`; failure reason in `details`), `auth.logout`, `auth.refresh_reuse` (`revoked`), `user.create`, `user.password_change` (`actor` `cli`), and the device actions `device.create`, `device.update` (`details.fields` lists the changed fields), `device.delete`, `device.agent_remove` (`target_type` `device`, `target_id` the device id; `details.name` for create/update/delete) and `device.wake` (`details.command_id`, `status`). Only successful requests are written; rejected ones (400/404/409/429) are not. `device.shutdown` arrives with Phase 3. A failed login stores `actor`/`actor_user_id` only when the submitted username is an existing account.
+Append-only record of security-relevant actions (login, shutdown, key rotation, config changes). Written by `internal/audit`. Actions today: `auth.login` (`result` `ok`/`failed`; failure reason in `details`), `auth.logout`, `auth.refresh_reuse` (`revoked`), `user.create`, `user.password_change` (`actor` `cli`), and the device actions `device.create`, `device.update` (`details.fields` lists the changed fields), `device.delete`, `device.agent_remove` (`target_type` `device`, `target_id` the device id; `details.name` for create/update/delete) and `device.wake` (`details.command_id`, `status`). Since Phase 3 also `device.shutdown` (`result` `ok` when the command was accepted or already complete, `failed` with `details.error_code` when dispatch failed; `details.command_id`, `status`, `name`) and `controller_key.create` (`actor` `system` on server start or `cli` for `homecore key show`; `target_type` `controller_key`, `target_id` the key id, `details.key_id`). Only successful requests are written for the device actions above; rejected ones (400/404/409/429) are not. `GET /activity` reads this table (ADR-015): the category is derived from the action prefix, and only a whitelist of `details` keys is exposed. A failed login stores `actor`/`actor_user_id` only when the submitted username is an existing account.
 
 | Column | Type | Null | Default | Note |
 |--------|------|------|---------|------|

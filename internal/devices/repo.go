@@ -61,6 +61,12 @@ type Repository interface {
 	// last_seen_at and last_latency_ms; with o.Changed it appends a history row in the same
 	// transaction. ErrNotFound if the device is gone.
 	RecordObservation(ctx context.Context, o Observation) error
+	// RecordAgentContact stores the outcome of a contact with the agent of a device: status
+	// ready (and last_ok_at, version when non-empty) or unreachable. Nothing happens when the
+	// device has no binding or is bound to another agent_id now.
+	RecordAgentContact(ctx context.Context, deviceID, agentID string, c AgentContact) error
+	// BoundDevices returns every device that has an agent binding (for the agent health job).
+	BoundDevices(ctx context.Context) ([]Device, error)
 	// PruneHistory deletes at most limit status history rows older than cutoff.
 	PruneHistory(ctx context.Context, cutoff time.Time, limit int) (int64, error)
 }

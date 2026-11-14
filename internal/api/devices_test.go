@@ -19,11 +19,14 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/thanhtunguet/homecore/internal/activity"
+	"github.com/thanhtunguet/homecore/internal/agentctl"
 	"github.com/thanhtunguet/homecore/internal/api/gen"
 	"github.com/thanhtunguet/homecore/internal/audit"
 	"github.com/thanhtunguet/homecore/internal/auth"
 	"github.com/thanhtunguet/homecore/internal/commands"
 	"github.com/thanhtunguet/homecore/internal/config"
+	"github.com/thanhtunguet/homecore/internal/controllerkey"
 	"github.com/thanhtunguet/homecore/internal/devices"
 	"github.com/thanhtunguet/homecore/internal/monitoring"
 	"github.com/thanhtunguet/homecore/internal/secrets"
@@ -41,6 +44,8 @@ type devEnv struct {
 	spec   *specChecker
 	mon    *monitoring.Monitor
 	engine *commands.Engine
+	key    *controllerkey.Key
+	repo   *devices.SQLiteRepository
 	token  string
 	userID string
 
@@ -74,6 +79,14 @@ func newDevEnv(t *testing.T) *devEnv { return newDevEnvCfg(t, nil) }
 
 // newDevEnvCfg lets a test adjust the Controller configuration (for example the command deadlines).
 func newDevEnvCfg(t *testing.T, mutate func(*config.Controller)) *devEnv {
+	t.Helper()
+	return newDevEnvOpts(t, mutate, false)
+}
+
+// newDevEnvOpts is newDevEnvCfg with a choice of probe: the scripted one (realProbe false, the
+// default: tests flip ports with setUp) or the monitor's real TCP probe (the integration tests with
+// a real agent use a real listener they close).
+func newDevEnvOpts(t *testing.T, mutate func(*config.Controller), realProbe bool) *devEnv {
 	t.Helper()
 	ctx := context.Background()
 	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "api.db"))
@@ -115,27 +128,35 @@ func newDevEnvCfg(t *testing.T, mutate func(*config.Controller)) *devEnv {
 	e := &devEnv{t: t, db: db, spec: newSpecChecker(t), token: pair.AccessToken, userID: user.ID, up: map[int]bool{}}
 	devRepo := devices.NewSQLiteRepository(db)
 	devSvc := devices.NewService(devRepo, nil)
-	e.mon = monitoring.New(monitoring.Config{
-		Store: devRepo, Log: log, Tick: 5 * time.Second, Concurrency: 4, OfflineThreshold: 2,
-		Probe: func(_ context.Context, _ string, port int, _ time.Duration) monitoring.ProbeResult {
+	monCfg := monitoring.Config{Store: devRepo, Log: log, Tick: 5 * time.Second, Concurrency: 4, OfflineThreshold: 2}
+	if !realProbe {
+		monCfg.Probe = func(_ context.Context, _ string, port int, _ time.Duration) monitoring.ProbeResult {
 			e.mu.Lock()
 			defer e.mu.Unlock()
 			if e.up[port] {
 				return monitoring.ProbeResult{Reachable: true, Latency: 3 * time.Millisecond}
 			}
 			return monitoring.ProbeResult{Err: context.DeadlineExceeded}
-		},
-	})
+		}
+	}
+	e.mon = monitoring.New(monCfg)
 	e.engine = commands.NewEngine(commands.Config{
 		Repo: commands.NewSQLiteRepository(db), Devices: devSvc, Prober: engineProber{e.mon}, Log: log,
 		WakeDeadline: cfg.Commands.WakeDeadline, ShutdownDeadline: cfg.Commands.ShutdownDeadline,
 	})
 	e.engine.Register(commands.TypeWake, commands.WakeDispatcher{Sender: wakeRecorder{e}})
+	key, _, err := controllerkey.LoadOrCreate(ctx, db, sealer, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.key, e.repo = key, devRepo
+	e.engine.Register(commands.TypeShutdown, &agentctl.ShutdownDispatcher{Signer: key, Status: devRepo, Log: log})
 	e.mon.SetObserver(e.engine)
 
 	srv, err := New(Deps{
 		Config: cfg, Log: log, DB: db, Auth: authSvc,
 		Devices: devSvc, Commands: e.engine, Monitor: e.mon, Audit: writer,
+		ControllerKey: key, Activity: activity.NewService(db),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -415,8 +436,8 @@ func TestAgentBindingThroughTheAPI(t *testing.T) {
 
 	d := e.mkDevice(map[string]any{"name": "srv", "agent": map[string]any{"agent_id": agentA}})
 	if d.Agent == nil || d.Agent.AgentId.String() != agentA || d.Agent.Port != 9750 || d.Agent.Scheme == nil || *d.Agent.Scheme != "http" ||
-		d.Agent.Status != nil || d.Agent.Version != nil || d.Agent.LastOkAt != nil {
-		t.Fatalf("binding with defaults (status/version/last_ok_at stay absent until Phase 3): %+v", d.Agent)
+		d.Agent.Status == nil || *d.Agent.Status != gen.AgentBindingStatusUnknown || d.Agent.Version != nil || d.Agent.LastOkAt != nil {
+		t.Fatalf("binding with defaults (status unknown until the first contact; version and last_ok_at absent): %+v", d.Agent)
 	}
 	path := "/api/v1/devices/" + d.Id.String()
 
@@ -597,8 +618,11 @@ func TestEveryImplementedOperationRequiresAuthentication(t *testing.T) {
 		{"POST", "/api/v1/devices/" + id + "/probe"},
 		{"GET", "/api/v1/devices/" + id + "/history"},
 		{"POST", "/api/v1/devices/" + id + "/wake"},
+		{"POST", "/api/v1/devices/" + id + "/shutdown"},
 		{"GET", "/api/v1/commands"},
 		{"GET", "/api/v1/commands/" + id},
+		{"GET", "/api/v1/system/controller-key"},
+		{"GET", "/api/v1/activity"},
 	} {
 		for _, token := range []string{"", "garbage"} {
 			rec := e.call(c.method, c.path, map[string]any{}, token)
@@ -610,15 +634,6 @@ func TestEveryImplementedOperationRequiresAuthentication(t *testing.T) {
 	// The anonymous attempts changed nothing.
 	if l := decode[gen.DeviceList](t, e.as("GET", "/api/v1/devices", nil)); len(l.Items) != 0 {
 		t.Fatal("an unauthenticated request created a device")
-	}
-}
-
-func TestShutdownIsStillNotImplemented(t *testing.T) {
-	e := newDevEnv(t)
-	d := e.mkDevice(map[string]any{"name": "pc"})
-	rec := e.callRaw("POST", "/api/v1/devices/"+d.Id.String()+"/shutdown", nil, e.token)
-	if rec.Code != 501 || errCode(t, rec) != "not_implemented" {
-		t.Fatalf("shutdown: %d %s", rec.Code, rec.Body)
 	}
 }
 

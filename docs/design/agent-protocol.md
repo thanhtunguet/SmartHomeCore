@@ -1,5 +1,7 @@
 # HomeCore Agent Protocol v1
 
+Last reviewed: 2026-11-14 (Phase 3: Controller behaviour implemented; wire format unchanged).
+
 Normative spec for Controller → Agent commands. Implementation:
 `internal/agent/protocol` (shared by both roles). Rationale: ADR-001, ADR-005.
 
@@ -96,11 +98,24 @@ Error:
    can simply press the button again.
 4. 4xx → command `failed` with the agent's `error.code`.
 
+Implemented by `internal/agentctl` (Phase 3) without any change to the wire format (protocol stays
+v1). Controller-side details that the protocol does not constrain:
+
+- The body's `command_id` is the Controller's command id; the retry reuses it. A `202`/`200` is
+  trusted only if the body's `agent_id` equals the binding's; otherwise it is treated as a
+  non-agent answer (`agent_bad_response`).
+- The Controller maps the agent's `error.code` onto the command's `error_code` unchanged when it is
+  one listed in §4, and adds its own codes for conditions the Agent cannot report
+  (`agent_unreachable`, `agent_timeout`, `agent_bad_response`, `agent_error`); see REQ-SHD-007.
+- The HTTP client uses no proxy, follows no redirects and keeps no connections alive.
+
 ## 6. Other Agent endpoints
 
 | Endpoint | Auth | Purpose |
 |----------|------|---------|
 | `GET /agent/v1/healthz` | none | liveness: `{"status":"ok","agent_id":"…","version":"…"}`; may be used as the device `monitor_port` |
+
+The Controller's health job (`agentctl.Health`, once a minute) calls this endpoint for every bound device that is online and accepts the answer only when `status` is `ok` and `agent_id` equals the binding's (ADR-015). It records the answer as `agent.status`, `agent.version` and `agent.last_ok_at` on the binding.
 
 ## 7. Future (not in v1)
 

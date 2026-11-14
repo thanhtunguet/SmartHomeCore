@@ -18,7 +18,7 @@ info:
       for operations the Controller has not implemented yet.
     * **Lists** are cursor-paginated (`limit`, `cursor`, `next_cursor`); there is no total count.
       Order is fixed per endpoint: devices by `name` (case-insensitive, ascending), commands newest
-      first, status history newest first.
+      first, status history newest first, activity newest first.
     * **Clearing optional text fields** on `PATCH /devices/{id}`: send an empty string (`""`) for
       `description`, `hostname`, `mac_address` or `wol_broadcast_address`. Omitted fields are unchanged.
       `null` is not used. To remove the agent binding call `DELETE /devices/{id}/agent`.
@@ -37,6 +37,7 @@ tags:
   - name: devices
   - name: commands
   - name: system
+  - name: activity
   - name: ddns
 
 paths:
@@ -405,12 +406,49 @@ paths:
       tags: [system]
       operationId: getControllerKey
       summary: Public signing key to paste into an agent's trusted_controllers
+      description: |
+        The active Ed25519 key the Controller signs agent commands with. Only the public part is ever
+        returned. `key_id` is the lower-case hex of the first 8 bytes of SHA-256(public key), the same
+        value an agent logs when it trusts the key. The key is generated on the Controller's first start.
+        The same values are printed by `homecore key show`.
       responses:
         "200":
           description: Active controller public key
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ControllerKey" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/activity:
+    get:
+      tags: [activity]
+      operationId: listActivity
+      summary: Activity feed (who did what), newest first
+      description: |
+        Read-only feed built from the Controller's audit log: sign-ins, device changes, wake and
+        shutdown requests, account changes. Any authenticated user may read it (ADR-011).
+
+        Command *outcomes* (`completed`, `timed_out`) are not entries here: an entry of category
+        `command` carries the `command_id`, and `GET /commands/{id}` gives its lifecycle.
+        Client addresses and the reasons of failed sign-ins are not exposed. Cursor-paginated like
+        the other lists; entries are never pruned by `retention_days`.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: device_id
+          in: query
+          description: Only entries about this device.
+          schema: { type: string, format: uuid }
+        - name: category
+          in: query
+          schema: { $ref: "#/components/schemas/ActivityCategory" }
+      responses:
+        "200":
+          description: Activity entries
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActivityList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/ddns:
@@ -696,12 +734,15 @@ components:
           type: string
           readOnly: true
           description: |
-            Reachability of the agent as seen by the Controller's dispatcher: `ready` (last contact
-            succeeded), `unreachable` (last contact failed) or `unknown` (never contacted). Absent
-            until the dispatcher reports it; clients must then treat it as `unknown`.
+            Reachability of the agent as seen by the Controller: `ready` (the bound agent answered its
+            last contact), `unreachable` (the last contact failed, the answering agent is not the bound
+            one, or the device is offline) or `unknown` (not contacted yet, or the binding just
+            changed). Updated by every shutdown request and by a health check about once a minute for
+            devices seen online. Always present on a device's agent; clients should still treat absence
+            as `unknown`.
           enum: [ready, unreachable, unknown]
-        version: { type: string, readOnly: true, description: Agent version reported on the last successful contact. }
-        last_ok_at: { type: string, format: date-time, readOnly: true, description: Last successful contact with the agent. }
+        version: { type: string, readOnly: true, description: Agent version reported by its last successful health check; absent until then. }
+        last_ok_at: { type: string, format: date-time, readOnly: true, description: Last successful contact with the agent (a health check or an accepted shutdown); absent until then. }
 
     DeviceType:
       type: string
@@ -857,8 +898,10 @@ components:
           description: |
             Machine-readable failure reason, present when `status` is `failed`. Values returned by the
             agent (`unauthorized`, `bad_request`, `wrong_agent`, `action_not_allowed`, `clock_skew`,
-            `stale`, `replay`, `busy`) are passed through; the Controller may add its own, so clients
-            must tolerate unknown values and fall back to `error`.
+            `stale`, `replay`, `busy`) are passed through. The Controller adds `wol_send_failed` (wake)
+            and, for shutdown, `agent_unreachable`, `agent_timeout`, `agent_bad_response`,
+            `agent_error` and `dispatch_error`; `interrupted` marks a command left pending by a
+            restart. Clients must tolerate unknown values and fall back to `error`.
         error: { type: string, description: Human-readable failure text. }
         deadline_at: { type: string, format: date-time }
         completed_at: { type: string, format: date-time }
@@ -951,6 +994,43 @@ components:
         key_id: { type: string, example: 3f9a0c1d2b4e5f60 }
         algorithm: { type: string, enum: [ed25519] }
         public_key: { type: string, description: Standard base64 of the 32-byte public key }
+
+    ActivityCategory:
+      type: string
+      description: |
+        `auth` sign-in and sign-out; `device` device and agent-binding changes; `command` wake and
+        shutdown requests; `ddns` DDNS changes; `user` account changes; `system` anything else
+        (for example the creation of the controller key).
+      enum: [auth, device, command, ddns, user, system]
+
+    ActivityItem:
+      type: object
+      required: [id, at, category, action, result, message]
+      properties:
+        id: { type: integer, format: int64, description: Increasing entry id; stable. }
+        at: { type: string, format: date-time }
+        actor:
+          type: string
+          description: Username at the time of the action, `cli` for the command line, `system` for the Controller itself. Absent when unknown (a failed sign-in for an unknown name).
+        category: { $ref: "#/components/schemas/ActivityCategory" }
+        action:
+          type: string
+          description: "Machine-readable action, for example `device.shutdown`, `device.update`, `auth.login`. Clients must tolerate unknown values."
+        device_id: { type: string, format: uuid, description: The device the entry is about (it may have been deleted since). }
+        command_id: { type: string, format: uuid, description: Set on wake and shutdown requests. }
+        result:
+          type: string
+          description: "`ok`, `failed`, or an error code."
+        message: { type: string, description: Human-readable English summary. }
+
+    ActivityList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ActivityItem" }
+        next_cursor: { type: string }
 
     DnsRecordType:
       type: string

@@ -298,3 +298,49 @@ with an active command is probed every tick (5 s by default) regardless of its i
 that wants an atomic "wake these N" must handle N responses. No new dependency (the conformance
 test uses `github.com/getkin/kin-openapi`, already a direct dependency for the spec-derived
 authorization policy; its `openapi3filter` and `routers/legacy` packages need no new module).
+
+---
+
+## ADR-015 — Phase 3 decisions: agent status semantics, health job and the activity feed
+
+**Context.** Phase 3 connected the Controller to the Agent. Four things the earlier ADRs left open:
+what `agent.status` means, how it is kept fresh, what the Controller trusts in an Agent's answer,
+and how the UI gets a feed of "what happened" without a second event store.
+
+**Decision.**
+- **`agent.status` is what the Controller last learned, not a live probe.** `ready` = the *bound*
+  agent answered (a protocol 4xx other than `wrong_agent` counts: the Agent is alive and refusing
+  on purpose). `unreachable` = network error, 5xx, an answer that is not a HomeCore agent, a
+  different `agent_id` than the binding's, or the host is known offline. `unknown` = never
+  contacted, or the binding's `agent_id`, port or scheme changed (the three fields reset).
+  `last_ok_at` moves only on success. Stored in `agent_bindings` (migration `0005`), never derived
+  on read, so list endpoints stay one query.
+- **Two writers, one rule.** The shutdown Dispatcher records every attempt; a health job
+  (`agentctl.Health`, once a minute, concurrency 4, not a config key) calls
+  `GET /agent/v1/healthz` for bound devices that are `online` and checks that the returned
+  `agent_id` is the bound one, because a reused IP or a cloned machine must not look `ready`.
+  Both write through `RecordAgentContact`, a compare-and-set on the binding's `agent_id`, so a
+  result that arrives after a re-bind is dropped. Offline devices are not probed: an agent that was
+  `ready` becomes `unreachable` without a request.
+- **The Controller trusts an Agent answer only if the body names the bound `agent_id` and
+  `command_id`.** Anything else is `agent_bad_response`. The HTTP client takes no proxy, follows no
+  redirects and keeps no connections, so a command cannot be bounced to another host.
+- **Retry stays at one immediate repeat** (ADR-012, agent-protocol §5), with the same `command_id`
+  and a fresh nonce. A 4xx is never retried.
+- **The activity feed is a view of `audit_log`, not a new table.** `GET /api/v1/activity` pages
+  `audit_log` newest first with a keyset cursor `{t, i}`, derives `category` from the action prefix
+  (`auth`, `device`, `command`, `ddns`, `user`, `system`), joins `devices` for names and exposes only a
+  whitelist of `details` keys, so a future audit detail cannot leak through the API by accident.
+  Rejected: a separate events table (two stores to keep consistent) and returning `details` verbatim.
+- **Audit write is best effort for shutdown.** `device.shutdown` is written after the dispatch;
+  a failed write is logged, not returned. The earlier architecture note suggested refusing the action
+  when the audit row cannot be written. The same database has already accepted the command row just
+  before, so a failure there is rare and refusing afterwards would not undo the dispatch; refusing
+  before would need a write-ahead record. Left as an open owner decision.
+
+**Consequences.** After a machine boots, `agent.status` can lag by up to one health interval (60 s);
+while a device is offline and the agent was `ready`, the next pass corrects it. The feed shows only
+what is audited: probes and monitor transitions are not in it. Changing the interval or making it
+configurable is a code change, not a config key, until a need appears. No new dependency, no wire
+change, protocol stays v1.
+

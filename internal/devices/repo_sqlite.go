@@ -24,7 +24,7 @@ const deviceSelect = `SELECT d.id, d.name, d.description, d.hostname, d.ip_addre
 	d.wol_broadcast_address, d.wol_port, d.device_type, d.os, d.monitor_port,
 	d.monitor_interval_seconds, d.monitor_timeout_ms, d.enabled, d.status, d.last_seen_at,
 	d.last_checked_at, d.last_latency_ms, d.created_at, d.updated_at,
-	a.agent_id, a.port, a.scheme
+	a.agent_id, a.port, a.scheme, a.status, a.version, a.last_ok_at
 	FROM devices d LEFT JOIN agent_bindings a ON a.device_id = d.id`
 
 type rowScanner interface{ Scan(dest ...any) error }
@@ -38,12 +38,13 @@ func scanDevice(r rowScanner) (Device, error) {
 		lastSeen, lastChecked, latency sql.NullInt64
 		created, updated               int64
 		agentID, agentScheme           sql.NullString
-		agentPort                      sql.NullInt64
+		agentStatus, agentVersion      sql.NullString
+		agentPort, agentOKAt           sql.NullInt64
 	)
 	if err := r.Scan(&d.ID, &d.Name, &d.Description, &d.Hostname, &d.IPAddress, &d.MACAddress,
 		&d.WOLBroadcastAddress, &d.WOLPort, &devType, &osName, &d.MonitorPort, &intervalS, &timeoutMs,
 		&enabled, &status, &lastSeen, &lastChecked, &latency, &created, &updated,
-		&agentID, &agentPort, &agentScheme); err != nil {
+		&agentID, &agentPort, &agentScheme, &agentStatus, &agentVersion, &agentOKAt); err != nil {
 		return Device{}, err
 	}
 	d.Type, d.OS, d.Status = Type(devType), OS(osName), Status(status)
@@ -58,7 +59,10 @@ func scanDevice(r rowScanner) (Device, error) {
 	}
 	d.CreatedAt, d.UpdatedAt = storage.FromMillis(created), storage.FromMillis(updated)
 	if agentID.Valid {
-		d.Agent = &AgentBinding{AgentID: agentID.String, Port: int(agentPort.Int64), Scheme: agentScheme.String}
+		d.Agent = &AgentBinding{
+			AgentID: agentID.String, Port: int(agentPort.Int64), Scheme: agentScheme.String,
+			Status: AgentStatus(agentStatus.String), Version: agentVersion.String, LastOKAt: nullTime(agentOKAt),
+		}
 	}
 	return d, nil
 }
@@ -123,10 +127,19 @@ func (r *SQLiteRepository) Create(ctx context.Context, d Device) error {
 }
 
 func upsertBinding(ctx context.Context, tx *sql.Tx, deviceID string, a AgentBinding, now time.Time) error {
+	// Re-binding to another agent or address forgets what was known about the old one; an update
+	// that changes nothing (the UI sends the whole binding on every PATCH) keeps it.
 	_, err := tx.ExecContext(ctx, `INSERT INTO agent_bindings (device_id, agent_id, port, scheme, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT (device_id) DO UPDATE SET agent_id = excluded.agent_id, port = excluded.port,
-			scheme = excluded.scheme, updated_at = excluded.updated_at`,
+		ON CONFLICT (device_id) DO UPDATE SET
+			status = CASE WHEN agent_id = excluded.agent_id AND port = excluded.port AND scheme = excluded.scheme
+				THEN status ELSE 'unknown' END,
+			version = CASE WHEN agent_id = excluded.agent_id AND port = excluded.port AND scheme = excluded.scheme
+				THEN version ELSE '' END,
+			last_ok_at = CASE WHEN agent_id = excluded.agent_id AND port = excluded.port AND scheme = excluded.scheme
+				THEN last_ok_at ELSE NULL END,
+			agent_id = excluded.agent_id, port = excluded.port, scheme = excluded.scheme,
+			updated_at = excluded.updated_at`,
 		deviceID, a.AgentID, a.Port, a.Scheme, storage.Millis(now), storage.Millis(now))
 	return err
 }
@@ -347,4 +360,45 @@ func (r *SQLiteRepository) PruneHistory(ctx context.Context, cutoff time.Time, l
 		return 0, fmt.Errorf("prune status history: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+// RecordAgentContact implements Repository. It is a no-op when the binding changed in the
+// meantime (another agent_id), so a late result cannot be attributed to a new agent.
+func (r *SQLiteRepository) RecordAgentContact(ctx context.Context, deviceID, agentID string, c AgentContact) error {
+	status := AgentUnreachable
+	if c.OK {
+		status = AgentReady
+	}
+	at := storage.Millis(c.At)
+	var err error
+	if c.OK {
+		_, err = r.db.ExecContext(ctx, `UPDATE agent_bindings SET status = ?, last_ok_at = ?,
+			version = CASE WHEN ? = '' THEN version ELSE ? END WHERE device_id = ? AND agent_id = ?`,
+			string(status), at, c.Version, c.Version, deviceID, agentID)
+	} else {
+		_, err = r.db.ExecContext(ctx, `UPDATE agent_bindings SET status = ? WHERE device_id = ? AND agent_id = ?`,
+			string(status), deviceID, agentID)
+	}
+	if err != nil {
+		return fmt.Errorf("record agent contact: %w", err)
+	}
+	return nil
+}
+
+// BoundDevices implements Repository.
+func (r *SQLiteRepository) BoundDevices(ctx context.Context) ([]Device, error) {
+	rows, err := r.db.QueryContext(ctx, deviceSelect+` WHERE a.device_id IS NOT NULL ORDER BY d.id`)
+	if err != nil {
+		return nil, fmt.Errorf("bound devices: %w", err)
+	}
+	defer rows.Close()
+	var out []Device
+	for rows.Next() {
+		d, err := scanDevice(rows)
+		if err != nil {
+			return nil, fmt.Errorf("bound devices: %w", err)
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }

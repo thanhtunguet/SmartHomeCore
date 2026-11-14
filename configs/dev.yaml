@@ -10,4 +10,4 @@ agent:
   listen: "127.0.0.1:9750"
   dry_run: true             # never actually power off the dev machine
   action_delay: 1s
-  trusted_controllers: []   # add a key from `build/devtools keygen` to test signed commands
+  trusted_controllers: []   # add a key from `build/devtools keygen`, or the Controller's own from `homecore key show --config configs/dev.yaml`

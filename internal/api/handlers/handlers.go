@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/thanhtunguet/homecore/internal/activity"
 	"github.com/thanhtunguet/homecore/internal/api/gen"
 	"github.com/thanhtunguet/homecore/internal/audit"
 	"github.com/thanhtunguet/homecore/internal/auth"
 	"github.com/thanhtunguet/homecore/internal/commands"
 	"github.com/thanhtunguet/homecore/internal/config"
+	"github.com/thanhtunguet/homecore/internal/controllerkey"
 	"github.com/thanhtunguet/homecore/internal/devices"
 	"github.com/thanhtunguet/homecore/internal/httpx"
 	"github.com/thanhtunguet/homecore/internal/monitoring"
@@ -35,6 +37,10 @@ type Handlers struct {
 	Commands *commands.Engine    // wake, command history, power_transition
 	Monitor  *monitoring.Monitor // probe
 	Audit    *audit.Writer       // audit_log entries for device changes (nil: not written)
+
+	// Phase 3.
+	ControllerKey *controllerkey.Key // GET /system/controller-key (nil: 501)
+	Activity      *activity.Service  // GET /activity (nil: 501)
 }
 
 var _ gen.ServerInterface = (*Handlers)(nil)

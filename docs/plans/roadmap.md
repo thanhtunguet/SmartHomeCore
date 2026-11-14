@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | Brief §7 (phases), §8 (MVP); [architecture](../design/architecture.md) |
-| Last updated | 2026-11-14 (Phase 2 device management done) |
+| Last updated | 2026-11-14 (Phase 3 Controller side done; systemd/polkit host validation open) |
 
 Legend: `[x]` done and verified · `[~]` partially done · `[ ]` not started.
 Tick items in the same change that completes them, and add a changelog entry.
@@ -16,17 +16,17 @@ Tick items in the same change that completes them, and add a changelog entry.
 | 1 | Core foundation | **Done** |
 | 1b | JWT authentication (MVP; the brief places it under §3.1) | **Done** |
 | 2 | Device management | **Done** |
-| 3 | Secure Agent | Agent side done; Controller side pending (agent binding storage done in Phase 2) |
+| 3 | Secure Agent | **Done** except host validation (systemd + polkit on a real Debian/Ubuntu host, open) |
 | 4 | DDNS and system monitoring | Interfaces only |
 | 5 | Android integration | Binding surface only |
 | 6 | Hardening | Not started |
 
 ## Next up (ordered)
 
-1. **Phase 3 — Controller key management + dispatcher**: the MVP "shutdown" story end to end (the generic command engine, the `Dispatcher` interface and the agent binding storage are in place).
-2. **Phase 0 — on-device Android spike**: slipped past Phase 2; do it before Phase 3 ends.
+1. **Phase 3 leftover — validate systemd + polkit on a real Debian/Ubuntu host** (a real power-off has never been exercised).
+2. **Phase 0 — on-device Android spike**: slipped past Phase 3; do it before Phase 4 ends.
 3. **Phase 4 — DDNS** (the retention job already prunes `ddns_sync_history`).
-4. Re-run the UI against the real Controller (Phase 2 backend exists now, GAP-BE-01).
+4. Re-run the UI against the real Controller (Phase 2 and 3 backends exist now, GAP-BE-01); regenerate the frontend types for the Phase 3 spec edits (`GET /activity`).
 
 ## Phase 0 — Android compatibility spike
 
@@ -92,14 +92,14 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [x] Linux power adapter via systemctl + polkit; dry-run elsewhere (REQ-AG-011)
 - [x] systemd units and polkit rule (`deploy/`)
 - [x] `devtools keygen|send`
-- [ ] Controller key management: generate on first run into `controller_keys` (sealed); `GET /api/v1/system/controller-key`
-- [ ] Controller dispatcher for `shutdown` (a `commands.Dispatcher` registered in `internal/app`, no engine change; the engine, deadline job, recovery and `power_transition` already handle both types): signed POST, 2 s timeout, at most one immediate retry with the same `command_id` (fail fast, ADR-012), map agent error codes into the command; already offline → complete without contacting the agent
-- [x] Device ↔ agent binding in the device API, including `DELETE /devices/{id}/agent` (done in Phase 2: stored in `agent_bindings`, REQ-DEV-006; `agent.status`/`version`/`last_ok_at` still wait for the dispatcher)
-- [ ] `audit_log` for shutdown requests (with the acting user)
-- [ ] `AgentBinding.status`, `version`, `last_ok_at` filled from the dispatcher's last contact (REQ-API-021, GAP-API-09)
-- [ ] `GET /api/v1/activity` (cursor list fed by `audit_log` and command history). Cheap once the audit writes exist; what the UI will do with it is not decided yet, so add it to the spec only when it is picked up (GAP-API-05)
+- [x] Controller key management: generated on first run into `controller_keys` (sealed); `GET /api/v1/system/controller-key`; `homecore key show` (REQ-SHD-001, 002)
+- [x] Controller dispatcher for `shutdown` (`agentctl.ShutdownDispatcher`, registered in `internal/app`, no engine change): signed POST, 2 s timeout, at most one immediate retry with the same `command_id`, agent error codes mapped into the command; already offline → completes without contacting the agent (REQ-SHD-003..008)
+- [x] Device ↔ agent binding in the device API, including `DELETE /devices/{id}/agent` (done in Phase 2: stored in `agent_bindings`, REQ-DEV-006; `agent.status`/`version`/`last_ok_at` filled in Phase 3)
+- [x] `audit_log` for shutdown requests (with the acting user), `device.shutdown` (REQ-SHD-009)
+- [x] `AgentBinding.status`, `version`, `last_ok_at` filled from every dispatcher contact and a once-a-minute health job (REQ-SHD-010, 011, REQ-API-021, GAP-API-09)
+- [x] `GET /api/v1/activity` (`listActivity`, cursor list fed by `audit_log`; REQ-API-023, GAP-API-05)
 - [ ] Validate systemd + polkit on a real Debian/Ubuntu host
-- [ ] Integration test: `both` mode with a fake `PowerController`
+- [x] Integration tests: real Controller + real Agent with a fake `PowerController` (`internal/api/shutdown_test.go`), and `app.Run` in `both` mode (`internal/app/app_test.go`)
 
 ## Phase 4 — DDNS and system monitoring
 
@@ -131,6 +131,10 @@ Tick items in the same change that completes them, and add a changelog entry.
 
 | Item | Source |
 |------|--------|
+| Make the audit write for `device.shutdown` blocking (refuse the action when it cannot be recorded), if the owner wants that stricter rule | ADR-015, REQ-SHD-009 |
+| Controller key rotation (insert a new key, retire the old, let agents trust both) | REQ-SHD known gaps |
+| Health-job interval as a config key; pin or accept self-signed agent certificates for `https` bindings | REQ-SHD known gaps |
+| Activity feed from sources other than `audit_log` (monitor transitions, DDNS) once the UI needs them | ADR-015 |
 | Cap the agent's accepted-`command_id` map (the protocol spec says caches are bounded) | REQ-AG-008 gap |
 | Signed agent acknowledgements (protocol v2) | agent-protocol §7 |
 | Signed agent announce for automatic IP updates | ADR-002 |

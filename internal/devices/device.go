@@ -97,6 +97,29 @@ type AgentBinding struct {
 	AgentID string
 	Port    int
 	Scheme  string // http | https
+
+	// Last known state of the agent, written by the shutdown dispatcher and the health job (never
+	// by the device API). Status is AgentUnknown until the first contact.
+	Status   AgentStatus
+	Version  string     // from GET /agent/v1/healthz, empty until a health check succeeded
+	LastOKAt *time.Time // last successful contact
+}
+
+// AgentStatus is the Controller's view of an agent (api/openapi.yaml AgentBinding.status).
+type AgentStatus string
+
+const (
+	AgentUnknown     AgentStatus = "unknown"
+	AgentReady       AgentStatus = "ready"
+	AgentUnreachable AgentStatus = "unreachable"
+)
+
+// AgentContact is the outcome of one contact with an agent, as the dispatcher or the health job
+// reports it.
+type AgentContact struct {
+	OK      bool      // the right agent answered
+	Version string    // reported version; empty keeps the stored one
+	At      time.Time // when the contact happened
 }
 
 // StatusChange is one row of the status history: a transition, not every probe.

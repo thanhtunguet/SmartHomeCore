@@ -5,7 +5,8 @@
 | Brief | §3.7, §6 (protection of keys and tokens) |
 | Code | `internal/storage`, `internal/storage/migrations`, `internal/secrets` |
 | Design | [database.md](../design/database.md), [architecture §6.8–6.9](../design/architecture.md), [ADR-004](../design/decisions.md#adr-004--sqlite-driver-moderncorgsqlite-everywhere) |
-| Status | **Implemented** (storage layer + schema); domain repositories planned |
+| Last updated | 2026-11-14 (Phase 3) |
+| Status | **Implemented** (storage layer + schema); Controller key sealed since Phase 3; DDNS repository planned |
 
 ## Storage
 
@@ -25,9 +26,9 @@
 |----|-------------|--------|-------------|
 | REQ-SEC-001 | A 32-byte master key is resolved in this order: `HOMECORE_MASTER_KEY` (base64) → key supplied by the host (Android Keystore through `mobile.Start`) → `<data_dir>/master.key`. The key file is created exclusively, mode `0600`, and fsynced. A malformed key stops startup. | Implemented | `TestMasterKeyPersistsWithStrictPermissions` |
 | REQ-SEC-002 | Secrets are sealed with AES-256-GCM as `nonce ‖ ciphertext`, with associated data naming the column (e.g. `ddns_configs.api_token`). Opening fails on tampering or wrong associated data. | Implemented | `TestSealOpenBindsAssociatedData` |
-| REQ-SEC-003 | Secret material is stored only in sealed BLOB columns: `controller_keys.private_key_sealed`, `ddns_configs.api_token_sealed`, `refresh_tokens.successor_sealed` (short-lived, wiped after 10 s), secret entries of `system_settings` (the JWT key). Refresh tokens are stored only as SHA-256 hashes; passwords only as argon2id hashes. | **Partial.** Implemented for the JWT key, refresh tokens and passwords (Phase 1b); writers for the Controller key and DDNS tokens are planned | `TestSigningKeyIsGeneratedOnceSealedAndDistinctFromMasterKey`, `TestRefreshTokensAreStoredOnlyAsHashes`, `TestSealedSuccessorIsWipedAfterTheWindow` |
+| REQ-SEC-003 | Secret material is stored only in sealed BLOB columns: `controller_keys.private_key_sealed`, `ddns_configs.api_token_sealed`, `refresh_tokens.successor_sealed` (short-lived, wiped after 10 s), secret entries of `system_settings` (the JWT key). Refresh tokens are stored only as SHA-256 hashes; passwords only as argon2id hashes. | **Partial.** Implemented for the JWT key, refresh tokens and passwords (Phase 1b) and, since Phase 3, the Controller key (`internal/controllerkey`, [REQ-SHD-001](shutdown-agent.md)); the writer for DDNS tokens is planned (Phase 4) | `TestSigningKeyIsGeneratedOnceSealedAndDistinctFromMasterKey`, `TestRefreshTokensAreStoredOnlyAsHashes`, `TestSealedSuccessorIsWipedAfterTheWindow`, `TestKeyIsCreatedOnceSealedAndStable`, `TestTamperedRowIsRejected` |
 | REQ-SEC-004 | API responses never contain secrets: devices have no secret fields; the DDNS `api_token` is `writeOnly` and reported only as `has_api_token`. | Implemented (spec) | `api/openapi.yaml` |
-| REQ-SEC-005 | The master key, the JWT signing key and the Controller Ed25519 signing key are distinct keys. | **Partial.** Master key and JWT key exist as independent random values (REQ-AUTH-004); the Ed25519 key is created by Phase 3 key management | `TestSigningKeyIsGeneratedOnceSealedAndDistinctFromMasterKey` |
+| REQ-SEC-005 | The master key, the JWT signing key and the Controller Ed25519 signing key are distinct keys. | **Implemented** (Phase 3). Master key, JWT key (REQ-AUTH-004) and Controller Ed25519 key (REQ-SHD-001) are independent random values | `TestSigningKeyIsGeneratedOnceSealedAndDistinctFromMasterKey`, `TestKeyIsDistinctFromJWTAndMasterKey` |
 
 ## Known gaps
 

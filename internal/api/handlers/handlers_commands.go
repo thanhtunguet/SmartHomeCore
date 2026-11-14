@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/thanhtunguet/homecore/internal/api/gen"
+	"github.com/thanhtunguet/homecore/internal/audit"
 	"github.com/thanhtunguet/homecore/internal/auth"
 	"github.com/thanhtunguet/homecore/internal/commands"
 	"github.com/thanhtunguet/homecore/internal/httpx"
@@ -33,6 +34,45 @@ func (h *Handlers) WakeDevice(w http.ResponseWriter, r *http.Request, id gen.Dev
 		return
 	}
 	h.audit(r, "device.wake", id.String(), map[string]any{"command_id": c.ID, "status": string(c.Status)})
+	httpx.WriteJSON(w, http.StatusAccepted, toAPICommand(c))
+}
+
+// ShutdownDevice requests a signed shutdown through the device's agent. Asynchronous and idempotent
+// (ADR-012): 202 with the command, which is the already active shutdown command, or one born
+// completed when the device is already offline (no agent contact). A device without an agent
+// binding is 409; the 1 req/s per-device limit (429) is applied by middleware.DeviceThrottle.
+// Every accepted request is audited (device.shutdown) with the acting user, the command id and
+// how it went; dispatch failures (agent unreachable, rejected) are a failed *command*, not an
+// HTTP error.
+func (h *Handlers) ShutdownDevice(w http.ResponseWriter, r *http.Request, id gen.DeviceId) {
+	if h.Commands == nil {
+		h.Unimplemented.ShutdownDevice(w, r, id)
+		return
+	}
+	p, ok := auth.FromContext(r.Context())
+	if !ok {
+		httpx.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
+		return
+	}
+	c, err := h.Commands.Request(r.Context(), commands.Request{
+		DeviceID: id.String(), Type: commands.TypeShutdown, RequestedBy: p.UserID,
+	})
+	if err != nil {
+		h.apiError(w, r, "shutdown device", err)
+		return
+	}
+	details := map[string]any{"command_id": c.ID, "status": string(c.Status)}
+	result := audit.ResultOK
+	if c.Status == commands.StatusFailed {
+		result = audit.ResultFailed
+		details["error_code"] = c.ErrorCode
+	}
+	if h.Devices != nil {
+		if d, err := h.Devices.Get(r.Context(), id.String()); err == nil {
+			details["name"] = d.Name
+		}
+	}
+	h.auditResult(r, "device.shutdown", id.String(), result, details)
 	httpx.WriteJSON(w, http.StatusAccepted, toAPICommand(c))
 }
 

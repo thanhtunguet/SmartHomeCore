@@ -5,8 +5,8 @@
 | Brief | §3.1, §4, §6 (public API zone) |
 | Code | `internal/api` (`server.go`, `middleware/`, `handlers/`, `gen/`), `api/openapi.yaml`, `web/`; authentication: [authentication.md](authentication.md) |
 | Design | [architecture §6.1, §9, §10](../design/architecture.md), [ADR-006](../design/decisions.md#adr-006--spec-first-rest-api), [ADR-008](../design/decisions.md#adr-008--offline-swagger-ui) |
-| Last updated | 2026-11-14 (Phase 2: device, probe, history, wake and command endpoints implemented) |
-| Status | **Implemented** foundation, authentication, devices and commands (wake); shutdown, system metrics and DDNS endpoints planned (return `501` with the error envelope) |
+| Last updated | 2026-11-14 (Phase 3: shutdown, controller key, activity feed, agent status) |
+| Status | **Implemented** foundation, authentication, devices, commands (wake and shutdown), controller key and activity feed; system metrics and DDNS endpoints planned (return `501` with the error envelope) |
 
 ## Functional requirements
 
@@ -30,10 +30,12 @@
 | REQ-API-016 | Static files: `assets/*` (content-hashed) are served with `Cache-Control: public, max-age=31536000, immutable`; `index.html` and the SPA fallback with `no-cache`. | Implemented | `TestStaticCacheHeaders` |
 | REQ-API-017 | Device registry extras: `device_type` and `os` (enums, defaults `desktop`/`linux`) and read-only `last_latency_ms` on `Device`; an empty string clears `description`, `hostname`, `mac_address` and `wol_broadcast_address` on `PATCH`; `DELETE /devices/{id}/agent` removes the agent binding and is idempotent. List order is fixed: devices by name (case-insensitive), commands and status history newest first, all with keyset cursors (`limit` 1..200, `400` on a bad limit or cursor). Detail: [devices-and-commands.md](devices-and-commands.md) REQ-DEV-001..011, REQ-MON-006/007, REQ-CMD-009. | Implemented | `TestDeviceCRUDHappyPath`, `TestPatchClearsOptionalTextWithEmptyString`, `TestAgentBindingThroughTheAPI`, `TestListPaginationOverHTTP`, `TestProbeAndHistory`, `TestCommandListFiltersPaginationAndErrors` (every response checked against the spec by `specChecker`); `TestRemoveDeviceAgentPolicy`, `TestDeviceMetaColumnsDefaultAndConstrain` |
 | REQ-API-018 | At most **one** `POST /devices/{id}/wake` or `/shutdown` per device per second, counted over all users and both types. Excess requests get `429 rate_limited` with `Retry-After: 1`. Enforced after authentication (anonymous requests do not use the slot); state is in memory. The UI applies the same guard (REQ-UI-018). | Implemented | `TestDeviceCommandThrottle`, `TestDeviceCommandThrottleAfterAuth`, `TestDeviceThrottle*` |
-| REQ-API-019 | Wake/shutdown are idempotent and fail fast (ADR-012): an active command of the same type is returned (`202`); a device already online (wake) / offline (shutdown) gets a command that completes at once; `409` only for a missing MAC (wake) or agent binding (shutdown); agent dispatch is one attempt with a 2 s timeout plus at most one immediate retry; wake and shutdown of a device are independent. | **Partial.** Wake is **Implemented** (REQ-CMD-001..006, `TestWakeLifecycleOverHTTP`, `TestWakeWithoutMACIs409`, `TestWakeSendFailureYieldsAFailedCommand`, `TestWakeTimesOutAtItsDeadline`, `commands.TestWakeIsIdempotent`); shutdown dispatch is Planned (Phase 3, `501`) | `TestWakeLifecycleOverHTTP`, `TestShutdownIsStillNotImplemented` |
+| REQ-API-019 | Wake/shutdown are idempotent and fail fast (ADR-012): an active command of the same type is returned (`202`); a device already online (wake) / offline (shutdown) gets a command that completes at once; `409` only for a missing MAC (wake) or agent binding (shutdown); agent dispatch is one attempt with a 2 s timeout plus at most one immediate retry; wake and shutdown of a device are independent. | Implemented. Wake: REQ-CMD-001..006; shutdown: REQ-SHD-003..012 (the Dispatcher retries once on a network error or 5xx with the same `command_id`; `409` for no agent binding) | `TestWakeLifecycleOverHTTP`, `TestWakeWithoutMACIs409`, `TestWakeSendFailureYieldsAFailedCommand`, `TestWakeTimesOutAtItsDeadline`, `commands.TestWakeIsIdempotent`; shutdown: `TestShutdownEndToEndWithARealAgent`, `TestShutdownOfAnOfflineDeviceCompletesWithoutContactingTheAgent`, `TestShutdownWithoutAnAgentBindingIs409`, `TestShutdownWithTheAgentDownFailsFast`, `agentctl.TestFiveHundredIsRetriedOnceWithTheSameCommandIDAndANewNonce` |
 | REQ-API-020 | Cloudflare lookups for the DDNS form: `POST /ddns/cloudflare/zones` and `POST /ddns/cloudflare/zones/{zone_id}/records` take exactly one of `api_token` or `config_id` in the body (never in a URL), return zones / A+AAAA records ordered by name, store nothing, and map Cloudflare failures to `502 cloudflare_error`. They are the only way to choose a zone and record: `DdnsConfig` and `DdnsConfigCreate` require `record_id`, the Controller never resolves a record by name, and `PATCH` with a new `zone_id` but no `record_id` is `400`. | **Planned** (spec done; Phase 4) | — |
-| REQ-API-021 | `AgentBinding` returns read-only `status` (`ready`/`unreachable`/`unknown`), `version` and `last_ok_at` from the dispatcher's last contact; absent until the dispatcher reports them. | **Planned** (spec done; Phase 3) | — |
+| REQ-API-021 | `AgentBinding` returns read-only `status` (`ready`/`unreachable`/`unknown`, always present on a bound device, `unknown` until the first contact), `version` and `last_ok_at` (absent until a health check or accepted shutdown succeeded). They are updated by every shutdown attempt and by the once-a-minute health check of devices seen online (REQ-SHD-010/011); the device API cannot write them. | Implemented | `TestAgentBindingThroughTheAPI`, `TestAgentStatusFromTheHealthJobOverHTTP`, `agentctl.TestHealth*`, `devices.TestAgentContactIsRecordedAndForgottenOnRebind` |
+| REQ-API-023 | `GET /api/v1/activity` (`listActivity`, any authenticated user) is a read-only feed built **from `audit_log` only**, newest first (`at`, `id` descending), cursor-paginated (`limit` 1..200, `next_cursor` only when more exist; a bad limit, cursor, category or device id is `400`). Items: `id` (integer), `at`, `actor` (username snapshot, `cli`, `system`; absent when unknown), `category` (`auth`, `device`, `command`, `ddns`, `user`, `system`, derived from the action; `device.wake` and `device.shutdown` are `command`), `action`, `device_id`, `command_id`, `result` (`ok`, `failed` or an error code) and an English `message`. Filters `device_id` and `category`. Command outcomes are **not** duplicated here (`GET /commands/{id}` has them). Exposure: `remote_addr`, login failure reasons and every audit `details` field outside a whitelist (name, username, command id, status, error code, key id) are never returned. `audit_log` is not pruned (REQ-RET-002). | Implemented | `TestActivityFeedOverHTTP`, `activity.TestFeedOrderPaginationAndFilters`, `activity.TestCategorySQLMatchesCategoryOf`, `activity.TestFeedExposesOnlyWhitelistedData`, `activity.TestMessages`, `activity.TestBadRequests`; smoke test 2026-11-14 |
 | REQ-API-022 | Accounts are managed by the `homecore user add\|passwd` command (Phase 1b), not by the API or the UI; there is no first-run bootstrap account. | Implemented (`homecore user add\|passwd\|list`, REQ-AUTH-015..018) | `TestUserAddPasswdListEndToEnd` |
+| REQ-API-024 | `GET /api/v1/system/controller-key` (`getControllerKey`, any authenticated user) returns exactly `key_id`, `algorithm` (`ed25519`) and the base64 `public_key` of the active Controller key (REQ-SHD-001/002); never the private key. `401` without a token. | Implemented | `TestControllerKeyEndpoint`, `TestAgentTrustingTheAPIKeyAcceptsTheDispatcher` |
 
 ## Endpoint implementation status
 
@@ -46,18 +48,20 @@ The full contract (brief §4 plus additions) is in `api/openapi.yaml`.
 | `GET/POST /api/v1/devices`, `GET/PATCH/DELETE /api/v1/devices/{id}` | Implemented (Phase 2) |
 | `POST /api/v1/devices/{id}/probe`, `GET /api/v1/devices/{id}/history` | Implemented (Phase 2) |
 | `POST /api/v1/devices/{id}/wake` | Implemented (Phase 2) |
-| `POST /api/v1/devices/{id}/shutdown` | Planned (Phase 3, `501`) |
+| `POST /api/v1/devices/{id}/shutdown` | Implemented (Phase 3) |
+| `GET /api/v1/activity` | Implemented (Phase 3; new operation `listActivity`) |
 | `GET /api/v1/commands`, `GET /api/v1/commands/{id}` | Implemented (Phase 2) |
 | `/api/v1/system/info` | Implemented |
-| `/api/v1/system/metrics`, `/api/v1/system/controller-key` | Planned (Phase 3/4) |
-| `DELETE /api/v1/devices/{id}/agent` | Implemented (Phase 2; the binding is stored now, the dispatcher is Phase 3) |
+| `/api/v1/system/controller-key` | Implemented (Phase 3) |
+| `/api/v1/system/metrics` | Planned (Phase 4) |
+| `DELETE /api/v1/devices/{id}/agent` | Implemented (Phase 2) |
 | `/api/v1/ddns*` incl. `/ddns/cloudflare/*` lookups | Planned (Phase 4) |
 
 ## Known gaps
 
 - The per-IP limit on `POST /auth/*` is tested (`TestLoginRateLimit`); there are still no automated tests for the general 600/min limit, CORS, body limit, security headers, request timeout, TLS,
   the `503` readiness path, or the fail-closed policy path.
-- `audit_log` is written for authentication and account changes (REQ-AUTH-014) and for device changes and wake (REQ-DEV-010); shutdown entries arrive with Phase 3.
+- `audit_log` is written for authentication and account changes (REQ-AUTH-014), device changes, wake and shutdown (REQ-DEV-010, REQ-SHD-009) and the creation of the Controller key; DDNS actions will follow with Phase 4. The activity feed shows request-time entries only.
 - `SystemMetrics` and `DdnsConfig` gained optional fields (`cpu_cores`, `load_average`, `kernel`, `restricted`, `process.pid/uptime_seconds`; `detected_ip`, `dns_value`, `last_checked_at`) that the Phase 4 providers must fill; until then they are absent.
 
 ## Spec changes in Phase 2
@@ -76,3 +80,17 @@ operation, field or status code was removed or renamed.
 a second `make generate` is byte-identical. The frontend's generated types
 (`frontend/src/api/generated`) were not regenerated here (the submodule is read-only for this work)
 and are stale for the same points.
+
+## Spec changes in Phase 3
+
+| Change | Why |
+|--------|-----|
+| New operation `GET /activity` (`listActivity`) with `ActivityItem`, `ActivityList`, `ActivityCategory` and a tag `activity` | GAP-API-05, REQ-API-023. Additive; the frontend is not changed by this work |
+| `AgentBinding.status/version/last_ok_at` descriptions | now always filled (REQ-API-021); schema unchanged (still optional, readOnly) |
+| `Command.error_code` description lists the Controller's codes | REQ-SHD-007 (`agent_unreachable`, `agent_timeout`, `agent_bad_response`, `agent_error`, `dispatch_error`, `wol_send_failed`, `interrupted`) |
+| `getControllerKey` description | what the key is and where else it is printed (`homecore key show`) |
+| "activity newest first" in the ordering convention | list ordering is fixed per endpoint |
+
+`make generate` rewrote `internal/api/gen/api.gen.go`; a second run is byte-identical. The frontend's
+generated types (`frontend/src/api/generated`) must be regenerated by the owner (`npm run gen:api`):
+the new operation and types, plus doc comments, appear there.

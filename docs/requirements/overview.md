@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | [`BRIEF.md`](../../BRIEF.md) (Technical Brief v0.1, Vietnamese) |
-| Last reviewed | 2026-11-14 (Phase 2) |
+| Last reviewed | 2026-11-14 (Phase 3) |
 | Owner | Project maintainers |
 
 This document turns the brief into the project's requirements baseline. It records which brief
@@ -33,7 +33,7 @@ One build supports both roles; configuration selects `controller`, `agent` or `b
 | G-4 | Maximum shared business logic between Android and Linux | **Partial.** One Go module; gomobile binding surface exists; AAR not built yet. |
 | G-5 | Easy to cross-compile, deploy and maintain | **Met.** `CGO_ENABLED=0` builds for 7 targets (`make cross`). |
 | G-6 | REST API documented with OpenAPI and Swagger UI at `/api/docs` | **Met.** Spec-first, offline Swagger UI. |
-| G-7 | Home-appropriate security without creating a remote-control hole | **Partial.** Agent security and JWT authentication done; Controller key management (Phase 3) pending. |
+| G-7 | Home-appropriate security without creating a remote-control hole | **Met** (Phase 3). Agent security, JWT authentication and Controller key management (sealed Ed25519 key, signed shutdown dispatch, audit) are done; only the systemd/polkit host validation is open. |
 
 ## 3. Platforms
 
@@ -54,7 +54,7 @@ One build supports both roles; configuration selects `controller`, `agent` or `b
 | Controller + Agent on macOS/Linux | **Implemented** | [runtime-and-configuration.md](runtime-and-configuration.md) |
 | Device CRUD and TCP online monitoring | **Implemented** (Phase 2): CRUD, probe, history, monitor job with hysteresis, status history, retention | [devices-and-commands.md](devices-and-commands.md) |
 | Wake-on-LAN | **Implemented** (Phase 2): `wakeDevice` with idempotent, fail-fast command lifecycle, completed by the monitor or timed out | [devices-and-commands.md](devices-and-commands.md) |
-| Secure shutdown Agent on Linux | **Implemented** (agent side); Controller dispatch pending | [shutdown-agent.md](shutdown-agent.md) |
+| Secure shutdown Agent on Linux | **Implemented** (Phase 3): Agent plus Controller dispatcher, `shutdownDevice`, Controller key, agent status and health job; systemd/polkit host validation pending | [shutdown-agent.md](shutdown-agent.md) |
 | SQLite | **Implemented** | [storage-and-secrets.md](storage-and-secrets.md) |
 | JWT authentication | **Implemented** (Phase 1b): argon2id, HS256 access tokens, rotating refresh tokens with reuse detection and grace window, `homecore user` CLI; no roles (ADR-011) | [authentication.md](authentication.md) |
 | Cloudflare DDNS | **Planned** | Phase 4 |
@@ -79,7 +79,7 @@ has a stable ID, a status and the test that verifies it.
 | [devices-and-commands.md](devices-and-commands.md) | `REQ-DEV`, `REQ-MON`, `REQ-CMD`, `REQ-RET` | §3.2, §3.3, §3.4, retention (§3.7) |
 | [authentication.md](authentication.md) | `REQ-AUTH` | §3.1 (JWT), §6.1, §6.6, §6.7 (audit) |
 | [storage-and-secrets.md](storage-and-secrets.md) | `REQ-ST`, `REQ-SEC` | §3.7, §6 (secrets) |
-| [shutdown-agent.md](shutdown-agent.md) | `REQ-AG` | §3.5, §6 (agent zone) |
+| [shutdown-agent.md](shutdown-agent.md) | `REQ-AG`, `REQ-SHD` | §3.5, §6 (agent zone, Controller key, shutdown dispatch) |
 | [web-ui.md](web-ui.md) | `REQ-UI` | §3.1 (static frontend), UI for §3.3–3.6 |
 
 Status vocabulary used everywhere:
@@ -100,7 +100,7 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 
 | # | Brief point | Status | Ref |
 |---|-------------|--------|-----|
-| 1.1 | Controller role: central server (devices, monitoring, WOL, shutdown, DDNS, REST API) | Partial | REQ-RT-001, roadmap |
+| 1.1 | Controller role: central server (devices, monitoring, WOL, shutdown, DDNS, REST API) | Partial (DDNS pending, Phase 4) | REQ-RT-001, REQ-SHD-*, roadmap |
 | 1.2 | Agent role: light service on Linux/Windows that verifies shutdown commands | Implemented (Linux/macOS) | REQ-AG-* |
 | 1.3 | One build supports both roles, selected by configuration | Implemented | REQ-RT-001 |
 | 1.4 | Goals (scale, 24/7, low resources, shared logic, cross-compile, OpenAPI, security) | See §2 above | — |
@@ -217,8 +217,8 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 
 | # | Brief point | Status | Ref |
 |---|-------------|--------|-----|
-| 4.1 | All draft endpoints (auth, devices, wake/shutdown/probe/history, metrics, DDNS, commands, docs) | Specified in `api/openapi.yaml`; health, docs, `/auth/*`, `/system/info`, devices (CRUD, probe, history, wake, agent removal) and commands implemented; the rest (shutdown, metrics, controller key, DDNS) return 501 with a valid token (401 without) | REQ-API-006 |
-| 4.2 | Wake/shutdown create a `command_id`; HTTP does not wait for the machine | Wake Implemented (`202` + `Command`, dedup enforced in DB); shutdown Planned (Phase 3) | REQ-ST-005, REQ-CMD-001/003 |
+| 4.1 | All draft endpoints (auth, devices, wake/shutdown/probe/history, metrics, DDNS, commands, docs) | Specified in `api/openapi.yaml`; health, docs, `/auth/*`, `/system/info`, devices (CRUD, probe, history, wake, agent removal) and commands implemented; shutdown, controller key and activity (Phase 3) implemented; the rest (metrics, DDNS) return 501 with a valid token (401 without) | REQ-API-006 |
+| 4.2 | Wake/shutdown create a `command_id`; HTTP does not wait for the machine | Wake Implemented (`202` + `Command`, dedup enforced in DB); shutdown Implemented (Phase 3: `202` + `Command`, idempotent, fail-fast) | REQ-ST-005, REQ-CMD-001/003, REQ-SHD-008 |
 
 ### §5 Source code architecture
 
@@ -239,13 +239,13 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 | 6.3 | Swagger UI grants no permission | Implemented | REQ-API-003 |
 | 6.4 | Cloudflare client with scoped token | Planned | Phase 4 |
 | 6.5 | Never expose the Agent to the Internet; prefer VPN | Documented (`deploy/README.md`, config comments) | REQ-AG-012 |
-| 6.6 | JWT secret ≠ Agent secret | Implemented (JWT key generated and sealed separately; the Controller Ed25519 key arrives in Phase 3) | REQ-AUTH-004, REQ-SEC-005 |
-| 6.7 | Shutdown requires admin and writes audit log | **Changed:** no roles (ADR-011), any authenticated user. `audit_log` writer exists (`internal/audit`, used by login/logout/account changes and, since Phase 2, device create/update/delete/agent removal/wake); the shutdown entry arrives with Phase 3 | REQ-API-008, REQ-AUTH-014, REQ-DEV-010 |
-| 6.8 | Private keys and Cloudflare tokens protected at rest | Partial (sealer implemented; used for the JWT key and refresh-grace copies; Controller key and DDNS tokens pending) | REQ-SEC-002, REQ-AUTH-004 |
+| 6.6 | JWT secret ≠ Agent secret | Implemented (JWT key, master key and the Controller Ed25519 key are three distinct secrets; the Controller key is generated and sealed in Phase 3) | REQ-AUTH-004, REQ-SEC-005, REQ-SHD-001 |
+| 6.7 | Shutdown requires admin and writes audit log | **Changed:** no roles (ADR-011), any authenticated user. `audit_log` writer exists (`internal/audit`, used by login/logout/account changes and, since Phase 2, device create/update/delete/agent removal/wake); since Phase 3 `shutdownDevice` writes `device.shutdown` (result ok/failed) and key creation writes `controller_key.create` | REQ-API-008, REQ-AUTH-014, REQ-DEV-010, REQ-SHD-009 |
+| 6.8 | Private keys and Cloudflare tokens protected at rest | Partial (sealer used for the JWT key, refresh-grace copies and, since Phase 3, the Controller key; DDNS tokens pending, Phase 4) | REQ-SEC-002, REQ-AUTH-004, REQ-SHD-001 |
 | 6.9 | Acknowledge before executing shutdown | Implemented | REQ-AG-009 |
 | 6.10 | Agent only runs predefined commands | Implemented | REQ-AG-005 |
 | 6.11 | Agent runs with least privilege | Implemented (polkit + hardened systemd unit; host validation pending) | REQ-AG-011 |
-| 6.12 | Ed25519: Controller key pair; Agent stores trusted Controller public keys | Implemented (Agent side); Controller key management Planned | REQ-AG-002 |
+| 6.12 | Ed25519: Controller key pair; Agent stores trusted Controller public keys | Implemented (Phase 3): Agent trusts configured public keys; Controller key generated, sealed, exposed at `GET /system/controller-key` and `homecore key show` | REQ-AG-002, REQ-SHD-001..003 |
 
 ### §7 Roadmap and §8 open questions
 

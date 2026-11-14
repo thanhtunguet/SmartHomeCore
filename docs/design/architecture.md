@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1 |
-| Last reviewed | 2026-11-14 (Phase 2: monitor, commands, cursors) |
+| Last reviewed | 2026-11-14 (Phase 3: shutdown dispatch, Controller key, agent status, activity feed) |
 | Requirements | [requirements/overview.md](../requirements/overview.md) |
 | Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs) |
 | API contract | [api/openapi.yaml](../../api/openapi.yaml) (source of truth) |
@@ -134,7 +134,10 @@ internal/
     middleware/
     handlers/
   auth/                  users, argon2id passwords, HS256 JWT, rotating refresh tokens, `homecore user` backend (no roles, ADR-011)
-  audit/                 audit_log writer (auth now, shutdown in Phase 3)
+  audit/                 audit_log writer (auth, devices, shutdown, controller key)
+  activity/              read-only activity feed over audit_log (`GET /activity`)
+  controllerkey/         Controller Ed25519 key: generate, seal, load (`LoadOrCreate`), sign
+  agentctl/              Controller-side client of the Agent: shutdown Dispatcher, health job
   devices/               device model, validation, repository
   monitoring/            TCP probe, hysteresis, scheduler job, status history
   wol/                   magic packet build/send, MAC parsing, broadcast resolution
@@ -204,7 +207,7 @@ Fields (see `devices` table): `id`, `name`, `description`, `hostname`, `ip_addre
   `agent_id` already bound to another device is `ErrAgentTaken` → `409`). `DELETE /devices/{id}/agent`
   removes it and is idempotent (`204` with or without a binding; `404` only for an unknown device).
   The binding lives in the same transaction as the device row it belongs to. `agent.status`,
-  `version` and `last_ok_at` stay absent until the Phase 3 dispatcher fills them.
+  `version` and `last_ok_at` are filled by `agentctl` (shutdown Dispatcher and health job, §6.5a); a binding that was never contacted reports `unknown`, and changing `agent_id`, port or scheme resets the three fields.
 - **Delete** removes the device and, through `ON DELETE CASCADE`, its `agent_bindings`,
   `device_status_history` and `commands` rows (database.md §Lifecycle). It writes `audit_log`
   (`device.delete`, `details.name`); audit rows are not tied to devices by a foreign key and survive.
@@ -265,8 +268,8 @@ Fields (see `devices` table): `id`, `name`, `description`, `hostname`, `ip_addre
   idempotency, already-in-target-state, insert, dispatch, state transition) and delegates what is
   specific to a `Dispatcher` registered per type with `Register` (by `app`). A `Dispatcher` has
   `Precheck(device)` (a precondition error becomes `409`, nothing is stored) and
-  `Dispatch(ctx, command, device) Result` (`Sent`, or a failure with `error_code`/message). Phase 3
-  adds the shutdown dispatcher without touching the engine. `WakeDispatcher` (`wake.go`) requires a
+  `Dispatch(ctx, command, device) Result` (`Sent`, or a failure with `error_code`/message). The
+  shutdown dispatcher (`internal/agentctl`, §6.5a) was added in Phase 3 without touching the engine. `WakeDispatcher` (`wake.go`) requires a
   MAC, resolves the broadcast address with `wol.BroadcastFor` and sends with `wol.Send` through a
   `WakeSender` interface (a fake in tests).
 - **Request flow** (wake): get the device → `Precheck` → active command of this type? return it →
@@ -286,7 +289,30 @@ Fields (see `devices` table): `id`, `name`, `description`, `hostname`, `ip_addre
   with a single query (list endpoints do not issue one query per device).
 - Every state change is a compare-and-set (`Update(id, from, change)`), so the monitor, the deadline
   job and a request cannot overwrite each other; transitions are validated by `Transition`.
-- Handlers write `audit_log` (`device.wake`) for each accepted wake.
+- Handlers write `audit_log` (`device.wake`, `device.shutdown`) for each accepted request.
+
+### 6.5a Shutdown dispatch and agent status (`internal/agentctl`, `internal/controllerkey`)
+- **Controller key** (`controllerkey.LoadOrCreate`): one Ed25519 key, generated on first start in a
+  transaction, seed sealed with the master key (AAD `controller_keys.private_key`). `app` creates it
+  before the API starts and audits `controller_key.create`. The public half is published by
+  `GET /system/controller-key` and `homecore key show`. `Key` never formats its private part
+  (`String`/`GoString`).
+- **ShutdownDispatcher** implements `commands.Dispatcher`. `Precheck`: no binding → `409`. `Dispatch`:
+  build `protocol.Command` (fresh nonce, `issued_at` now), `Sign`, `POST` to the bound agent through
+  an HTTP client without proxy, redirects or keep-alive, with a 2 s timeout. A network error or 5xx
+  is retried once immediately with the same `command_id` and a new nonce/`issued_at`; a 4xx is final.
+  `202`/`200 already_*` from the bound agent → `acknowledged`; everything else → `failed` with the
+  codes of REQ-SHD-005/007. The request goroutine never waits for the machine (ADR-012); the monitor
+  completes the command when the device is `offline`.
+- **Agent status**: every dispatcher contact and every health pass calls
+  `devices.Repository.RecordAgentContact(deviceID, agentID, contact)`, a compare-and-set on the
+  binding's `agent_id`. Semantics in ADR-015.
+- **Health job** (`agentctl.Health`, `Run(ctx)`): once a minute, at most 4 requests in flight, for each
+  bound device that is `online`: `GET /agent/v1/healthz`, which must answer `200` with the bound
+  `agent_id`. An `offline` device whose agent was `ready` is set to `unreachable` without a request; devices with status `unknown` are skipped.
+- **Activity feed** (`internal/activity`): `Service.List` pages `audit_log` newest first with the
+  cursor `{t, i}`, derives a category from the action prefix, joins `devices` for names and exposes
+  a whitelist of `details` keys; `GET /activity` filters by `category` and `device_id`.
 
 ### 6.6 Agent (`internal/agent`)
 - Separate listener (default `:9750`), separate config, no DB (state in a small data dir:
@@ -408,6 +434,7 @@ Namespace `/api/v1`; full contract in `api/openapi.yaml`. Summary (brief §4, pl
 | GET | `/api/v1/devices/{id}/history` | user |
 | GET | `/api/v1/commands` · ✚`/commands/{id}` | user |
 | GET | `/api/v1/system/metrics` · ✚`/system/info` · ✚`/system/controller-key` | user |
+| GET | ✚`/api/v1/activity` | user; cursor-paged feed over `audit_log` |
 | GET/POST | `/api/v1/ddns` | user |
 | ✚PATCH/DELETE | `/api/v1/ddns/{id}` | user |
 | POST | `/api/v1/ddns/{id}/sync` | user |
@@ -443,7 +470,7 @@ Principles:
 2. Agent listener is LAN-only; remote access via VPN (WireGuard/Tailscale), never port-forwarded.
 3. Separate keys: JWT signing key ≠ Controller signing key ≠ master key.
 4. No plaintext secrets in the DB; no secrets in API responses or logs.
-5. Shutdown writes `audit_log` (with the acting user). Wake/shutdown are throttled per device (ADR-012).
+5. Shutdown writes `audit_log` `device.shutdown` (with the acting user). Wake/shutdown are throttled per device (ADR-012).
 6. Accounts are created and re-passworded with the `homecore user add|passwd|list` command (§10.1);
    there is no default account and no password in the log. Android: the host app will call the same
    code through `mobile` (to be designed with Phase 5; not exposed yet).
@@ -474,7 +501,7 @@ current ones after a successful login, so raising `auth.DefaultParams` needs no 
 
 **Signing key.** 32 random bytes, generated at first start inside a transaction, sealed with the
 master key (AAD `system_settings.auth.jwt_signing_key`) and stored in `system_settings`. It is
-unrelated to the master key and to the Controller Ed25519 key (Phase 3). Rotation = delete the row
+unrelated to the master key and to the Controller Ed25519 key (`internal/controllerkey`, Phase 3). Rotation = delete the row
 (signs everybody out; refresh tokens keep working).
 
 **Access token.** HS256 JWT, `sub`/`username`/`iat`/`exp`/`jti`, lifetime `access_token_ttl`.
@@ -515,10 +542,10 @@ the same transaction. Access tokens are stateless and stay valid until `exp` in 
 
 **Audit.** `internal/audit.Writer` (`Write`, `WriteTx`) appends to `audit_log`. Actions written
 today: `auth.login` (ok/failed), `auth.logout`, `auth.refresh_reuse`, `user.create`,
-`user.password_change` (actor `cli`). A failed login stores the username only when it matches an
+`user.password_change` (actor `cli`), the device actions (`device.create|update|delete|agent_remove|wake`), `device.shutdown` and `controller_key.create` (actor `system` or `cli`). A failed login stores the username only when it matches an
 existing account; unknown names are dropped because users do mistype passwords into that field.
 Details never carry passwords, tokens or keys. Login-path writes are best effort (error logged);
-Phase 3 shutdown will use the returned error to refuse the action if the record cannot be written.
+`device.shutdown` is also best effort: it is written after the dispatch and a failed write is logged, not returned (REQ-SHD-009). Refusing to shut down when the audit row cannot be written was considered and not built; see the open decision in the Phase 3 changelog.
 
 **Maintenance.** `auth.Service.Run(ctx)` (an errgroup member of the Controller) wipes expired
 sealed copies and deletes refresh rows that expired or were revoked > 24 h ago or rotated > 7 days ago.
@@ -567,7 +594,7 @@ use `//go:build linux && !android`.
   state machine, hysteresis, config validation).
 - Storage tests against a temp-file SQLite DB (real driver, no mocks).
 - API tests with `httptest` against the real router + temp DB; authentication tests use the real `auth.Service` (JWT, refresh tokens, audit) and a fake clock for expiry and the grace window.
-- Integration test: Controller and Agent in `both` mode with a fake `PowerController`.
+- Integration tests: `internal/api/shutdown_test.go` runs the real Controller router and the real Agent handler (fake `PowerController`) over loopback; `internal/app/app_test.go` runs `app.Run` in `both` mode end to end.
 - Cross-compile check in CI for all targets (`make cross`).
 - Resource benchmark (Phase 6): idle RSS target < 30 MB, idle CPU ≈ 0 %.
 

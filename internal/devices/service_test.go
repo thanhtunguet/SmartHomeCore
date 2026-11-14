@@ -231,7 +231,7 @@ func TestAgentBindingLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Agent == nil || *d.Agent != (AgentBinding{AgentID: agentA, Port: 9750, Scheme: "http"}) {
+	if d.Agent == nil || *d.Agent != (AgentBinding{AgentID: agentA, Port: 9750, Scheme: "http", Status: AgentUnknown}) {
 		t.Fatalf("binding after create: %+v", d.Agent)
 	}
 
@@ -246,7 +246,7 @@ func TestAgentBindingLifecycle(t *testing.T) {
 
 	// PATCH replaces the binding; a PATCH without `agent` leaves it alone.
 	d, err = s.Update(ctx, d.ID, UpdateInput{Agent: &AgentInput{AgentID: agentB, Port: 9999, Scheme: "https"}})
-	if err != nil || *d.Agent != (AgentBinding{AgentID: agentB, Port: 9999, Scheme: "https"}) {
+	if err != nil || *d.Agent != (AgentBinding{AgentID: agentB, Port: 9999, Scheme: "https", Status: AgentUnknown}) {
 		t.Fatalf("binding after update: %+v %v", d.Agent, err)
 	}
 	if d, err = s.Update(ctx, d.ID, UpdateInput{Description: ptr("x")}); err != nil || d.Agent == nil || d.Agent.AgentID != agentB {
@@ -504,5 +504,75 @@ func TestPruneHistory(t *testing.T) {
 	p, _ := s.History(ctx, d.ID, 10, "")
 	if len(p.Items) != 2 {
 		t.Fatalf("expected 2 rows left, got %d", len(p.Items))
+	}
+}
+
+// REQ-API-021: the agent status lives on the binding; a contact updates it, the device API cannot,
+// and re-binding to another agent or address forgets it while an identical PATCH keeps it.
+func TestAgentContactIsRecordedAndForgottenOnRebind(t *testing.T) {
+	s, repo, _ := newTestService(t)
+	ctx := context.Background()
+	agentA, agentB := uuid.NewString(), uuid.NewString()
+	d, err := s.Create(ctx, CreateInput{Name: "srv", IPAddress: "10.0.0.3", MonitorPort: 22, Agent: &AgentInput{AgentID: agentA}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
+
+	if err := repo.RecordAgentContact(ctx, d.ID, agentA, AgentContact{OK: true, Version: "1.2.3", At: at}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(ctx, d.ID)
+	if got.Agent.Status != AgentReady || got.Agent.Version != "1.2.3" || got.Agent.LastOKAt == nil || !got.Agent.LastOKAt.Equal(at) {
+		t.Fatalf("after a good contact: %+v", got.Agent)
+	}
+	// A failure flips the status but keeps what was last known to work; an empty version keeps the old one.
+	if err := repo.RecordAgentContact(ctx, d.ID, agentA, AgentContact{OK: false, At: at.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RecordAgentContact(ctx, d.ID, agentA, AgentContact{OK: true, At: at.Add(2 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.Get(ctx, d.ID)
+	if got.Agent.Status != AgentReady || got.Agent.Version != "1.2.3" || !got.Agent.LastOKAt.Equal(at.Add(2*time.Minute)) {
+		t.Fatalf("after fail then ok without version: %+v", got.Agent)
+	}
+	if err := repo.RecordAgentContact(ctx, d.ID, agentA, AgentContact{OK: false, At: at.Add(3 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.Get(ctx, d.ID)
+	if got.Agent.Status != AgentUnreachable || !got.Agent.LastOKAt.Equal(at.Add(2*time.Minute)) {
+		t.Fatalf("after a failure: %+v", got.Agent)
+	}
+
+	// A late result for a previous agent_id is ignored.
+	if err := repo.RecordAgentContact(ctx, d.ID, agentB, AgentContact{OK: true, Version: "evil", At: at}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.Get(ctx, d.ID); got.Agent.Status != AgentUnreachable || got.Agent.Version != "1.2.3" {
+		t.Fatalf("a contact for another agent_id changed the binding: %+v", got.Agent)
+	}
+
+	// The UI sends the whole binding on every PATCH: an identical one keeps the status...
+	if err := repo.RecordAgentContact(ctx, d.ID, agentA, AgentContact{OK: true, At: at}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = s.Update(ctx, d.ID, UpdateInput{Agent: &AgentInput{AgentID: agentA, Port: 9750, Scheme: "http"}}); err != nil || got.Agent.Status != AgentReady {
+		t.Fatalf("identical rebind: %+v %v", got.Agent, err)
+	}
+	// ...a changed port or agent forgets it.
+	for _, in := range []AgentInput{{AgentID: agentA, Port: 9751}, {AgentID: agentB}} {
+		in := in
+		if got, err = s.Update(ctx, d.ID, UpdateInput{Agent: &in}); err != nil || got.Agent.Status != AgentUnknown || got.Agent.Version != "" || got.Agent.LastOKAt != nil {
+			t.Fatalf("rebind %+v: %+v %v", in, got.Agent, err)
+		}
+		_ = repo.RecordAgentContact(ctx, d.ID, in.AgentID, AgentContact{OK: true, Version: "9", At: at})
+	}
+
+	// BoundDevices lists only devices with a binding.
+	create(t, s, "plain")
+	bound, err := repo.BoundDevices(ctx)
+	if err != nil || len(bound) != 1 || bound[0].ID != d.ID {
+		t.Fatalf("bound devices: %+v %v", bound, err)
 	}
 }

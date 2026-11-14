@@ -4,6 +4,7 @@
 //	homecore --mode agent
 //	homecore --mode both
 //	homecore user add|passwd|list [--config FILE] [--data-dir DIR] [USERNAME]
+//	homecore key show [--config FILE] [--data-dir DIR]
 package main
 
 import (
@@ -31,6 +32,9 @@ func run() error {
 	if len(os.Args) > 1 && os.Args[1] == "user" {
 		return runUser(os.Args[2:], defaultCLIEnv())
 	}
+	if len(os.Args) > 1 && os.Args[1] == "key" {
+		return runKey(os.Args[2:], defaultCLIEnv())
+	}
 
 	var (
 		configPath  = flag.String("config", os.Getenv("HOMECORE_CONFIG"), "path to YAML config file (env HOMECORE_CONFIG)")
@@ -39,7 +43,7 @@ func run() error {
 		showVersion = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage:\n  homecore [flags]                    run the Controller and/or Agent\n  homecore user add|passwd|list ...   manage accounts (see `homecore user -h`)\n\nFlags:\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage:\n  homecore [flags]                    run the Controller and/or Agent\n  homecore user add|passwd|list ...   manage accounts (see `homecore user -h`)\n  homecore key show                   print the Controller public key for agents (see `homecore key -h`)\n\nFlags:\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()

@@ -10,12 +10,15 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/thanhtunguet/homecore/internal/activity"
 	"github.com/thanhtunguet/homecore/internal/agent"
+	"github.com/thanhtunguet/homecore/internal/agentctl"
 	"github.com/thanhtunguet/homecore/internal/api"
 	"github.com/thanhtunguet/homecore/internal/audit"
 	"github.com/thanhtunguet/homecore/internal/auth"
 	"github.com/thanhtunguet/homecore/internal/commands"
 	"github.com/thanhtunguet/homecore/internal/config"
+	"github.com/thanhtunguet/homecore/internal/controllerkey"
 	"github.com/thanhtunguet/homecore/internal/ddns"
 	"github.com/thanhtunguet/homecore/internal/devices"
 	"github.com/thanhtunguet/homecore/internal/monitoring"
@@ -71,7 +74,7 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 	if err != nil {
 		return err
 	}
-	// TODO(phase-3/4): inject the sealer into controller key management and DDNS tokens too.
+	// TODO(phase-4): inject the sealer into DDNS tokens too.
 
 	authSvc, err := auth.NewService(ctx, auth.Config{
 		DB:         db,
@@ -88,6 +91,23 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 		return fmt.Errorf("count users: %w", err)
 	} else if n == 0 {
 		log.Warn("no user accounts exist, nobody can sign in: run `homecore user add <username>` (add --config/--data-dir as for the server)")
+	}
+
+	auditWriter := audit.NewWriter(db, nil)
+	ctlKey, created, err := controllerkey.LoadOrCreate(ctx, db, sealer, nil)
+	if err != nil {
+		return err
+	}
+	if created {
+		log.Info("controller signing key created: put its public key into the agents' trusted_controllers (GET /api/v1/system/controller-key or `homecore key show`)",
+			"key_id", ctlKey.ID)
+		if err := auditWriter.Write(ctx, audit.Entry{Actor: "system", Action: "controller_key.create",
+			TargetType: "controller_key", TargetID: ctlKey.ID, Result: audit.ResultOK,
+			Details: map[string]any{"key_id": ctlKey.ID}}); err != nil {
+			log.Warn("audit write failed", "action", "controller_key.create", "err", err)
+		}
+	} else {
+		log.Info("controller signing key loaded", "key_id", ctlKey.ID)
 	}
 
 	devRepo := devices.NewSQLiteRepository(db)
@@ -109,7 +129,10 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 		ShutdownDeadline: cfg.Controller.Commands.ShutdownDeadline,
 	})
 	engine.Register(commands.TypeWake, commands.WakeDispatcher{})
-	// TODO(phase-3): engine.Register(commands.TypeShutdown, <signed agent dispatcher>).
+	engine.Register(commands.TypeShutdown, &agentctl.ShutdownDispatcher{
+		Signer: ctlKey, Status: devRepo, Log: log.With("component", "shutdown"),
+	})
+	health := agentctl.NewHealth(agentctl.HealthConfig{Store: devRepo, Log: log.With("component", "agent-health")})
 	mon.SetObserver(engine) // the monitor completes wake/shutdown commands through the engine
 	prune := retention.New(retention.Config{
 		Days: cfg.Controller.RetentionDays,
@@ -133,7 +156,9 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 		Devices:         devSvc,
 		Commands:        engine,
 		Monitor:         mon,
-		Audit:           audit.NewWriter(db, nil),
+		Audit:           auditWriter,
+		ControllerKey:   ctlKey,
+		Activity:        activity.NewService(db),
 	})
 	if err != nil {
 		return err
@@ -145,6 +170,7 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 	g.Go(func() error { return mon.Run(gctx) })     // TCP probes, status persistence
 	g.Go(func() error { return engine.Run(gctx) })  // command recovery and deadlines
 	g.Go(func() error { return prune.Run(gctx) })   // retention_days pruning
+	g.Go(func() error { return health.Run(gctx) })  // agent status (healthz) once a minute
 	// TODO(phase-4): g.Go(ddnsSyncer.Run).
 	return g.Wait()
 }

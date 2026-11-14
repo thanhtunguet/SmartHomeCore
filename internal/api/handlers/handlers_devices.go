@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/thanhtunguet/homecore/internal/activity"
 	"github.com/thanhtunguet/homecore/internal/api/gen"
 	"github.com/thanhtunguet/homecore/internal/api/middleware"
 	"github.com/thanhtunguet/homecore/internal/audit"
@@ -273,10 +274,14 @@ func toAPIDevice(d devices.Device, pt devices.PowerTransition) gen.Device {
 		out.LastCheckedAt = ptr(d.LastCheckedAt.UTC())
 	}
 	if d.Agent != nil {
-		// status, version and last_ok_at stay absent until the Phase 3 dispatcher reports them.
 		out.Agent = &gen.AgentBinding{
 			AgentId: uuid.MustParse(d.Agent.AgentID), Port: d.Agent.Port,
-			Scheme: ptr(gen.AgentBindingScheme(d.Agent.Scheme)),
+			Scheme:  ptr(gen.AgentBindingScheme(d.Agent.Scheme)),
+			Status:  ptr(gen.AgentBindingStatus(d.Agent.Status)),
+			Version: nonEmpty(d.Agent.Version),
+		}
+		if d.Agent.LastOKAt != nil {
+			out.Agent.LastOkAt = ptr(d.Agent.LastOKAt.UTC())
 		}
 	}
 	return out
@@ -303,11 +308,16 @@ func changedFields(u gen.DeviceUpdate) []string {
 }
 
 func (h *Handlers) audit(r *http.Request, action, deviceID string, details map[string]any) {
+	h.auditResult(r, action, deviceID, audit.ResultOK, details)
+}
+
+// auditResult writes an audit entry about a device with the acting user and client address.
+func (h *Handlers) auditResult(r *http.Request, action, deviceID, result string, details map[string]any) {
 	if h.Audit == nil {
 		return
 	}
 	e := audit.Entry{
-		Action: action, TargetType: "device", TargetID: deviceID, Result: audit.ResultOK,
+		Action: action, TargetType: "device", TargetID: deviceID, Result: result,
 		RemoteAddr: middleware.ClientIP(r), Details: details,
 	}
 	if p, ok := auth.FromContext(r.Context()); ok {
@@ -330,7 +340,8 @@ func (h *Handlers) apiError(w http.ResponseWriter, r *http.Request, op string, e
 		httpx.WriteError(w, http.StatusConflict, "conflict", err.Error())
 	case errors.As(err, &verr):
 		httpx.WriteError(w, http.StatusBadRequest, "bad_request", verr.Error())
-	case errors.Is(err, page.ErrBadCursor), errors.Is(err, page.ErrBadLimit), errors.Is(err, commands.ErrInvalid):
+	case errors.Is(err, page.ErrBadCursor), errors.Is(err, page.ErrBadLimit), errors.Is(err, commands.ErrInvalid),
+		errors.Is(err, activity.ErrInvalid):
 		httpx.WriteError(w, http.StatusBadRequest, "bad_request", err.Error())
 	default:
 		if errors.Is(err, context.Canceled) && r.Context().Err() != nil {

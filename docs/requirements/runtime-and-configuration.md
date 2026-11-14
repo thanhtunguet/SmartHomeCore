@@ -5,7 +5,7 @@
 | Brief | §1 (roles, one build), §2, §5 ("One binary, several roles") |
 | Code | `cmd/homecore` (`main.go`, `user.go`), `internal/app`, `internal/config`, `internal/logging`, `internal/httpx`, `internal/version`, `mobile` |
 | Design | [architecture §4](../design/architecture.md#4-runtime-model) |
-| Last updated | 2026-11-14 (Phase 2: REQ-RT-004 gains the command-deadline and retention checks) |
+| Last updated | 2026-11-14 (Phase 3: REQ-RT-012 `homecore key show`; earlier: Phase 2 REQ-RT-004 command-deadline and retention checks) |
 | Status | **Implemented** |
 
 ## Functional requirements
@@ -22,8 +22,8 @@
 | REQ-RT-008 | The `mobile` package exposes a gomobile-compatible API: `SetLogSink(LogSink)`, `Start(dataDir, configYAML, masterKey)`, `Stop(timeoutMillis)`, `IsRunning()`, `LastError()`, `Version()`. On Android only `controller` mode is accepted; the data dir is forced to the given app-private directory. | Implemented (untested) | Compiles for `android/arm64`; AAR not built yet |
 | REQ-RT-009 | Data directory layout: `<data_dir>/homecore.db` (Controller DB), `<data_dir>/master.key`, `<agent.data_dir>/agent_id` (default `<data_dir>/agent`). Directories are created with mode `0700`, secret files with `0600`. | Implemented | `TestMasterKeyPersistsWithStrictPermissions`; manual permission check |
 | REQ-RT-010 | The binary builds with `CGO_ENABLED=0` for linux/amd64, linux/arm64, linux/arm, windows/amd64, darwin/arm64, darwin/amd64 and android/arm64 (`make cross`). | Implemented | `make cross` 2026-11-11 |
-
 | REQ-RT-011 | `homecore user add\|passwd\|list` subcommands share the server's configuration loading (`--config`, `--data-dir`, `HOMECORE_*`) and operate on the same `<data_dir>/homecore.db`; see [REQ-AUTH-015..018](authentication.md). The key `controller.auth.bootstrap_admin_user` no longer exists (removed 2026-11-14; a config that sets it fails strict validation). `controller.auth` keeps `access_token_ttl`, `refresh_token_ttl`, `login_rate_per_minute`, `api_rate_per_minute`. | Implemented | `TestUserDataDirFromEnvironment`, `TestLoadBytesRejectsUnknownFieldsAndBadValues/removed_bootstrap_key`, `TestShippedConfigFilesAreValid` |
+| REQ-RT-012 | `homecore key show` shares the server's configuration loading (`--config`, `--data-dir`, `HOMECORE_*`), creates the Controller key if it does not exist yet (and audits `controller_key.create` with actor `cli`), and prints `key_id`, `algorithm`, the base64 public key and an Agent `trusted_controllers` snippet. It never prints the private key; see [REQ-SHD-002](shutdown-agent.md). | Implemented | `TestKeyShowCreatesThenReprintsTheSameKey`, `TestKeyUsageErrors` |
 
 ## Non-functional requirements
 

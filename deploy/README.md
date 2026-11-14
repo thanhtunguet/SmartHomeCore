@@ -23,6 +23,11 @@ journalctl -u homecore-agent | grep agent_id     # bind this id to the device on
 # (min. 12 characters); HOMECORE_PASSWORD or stdin also work for scripts.
 sudo -u homecore homecore user add --config /etc/homecore/homecore.yaml alice
 sudo -u homecore homecore user passwd --config /etc/homecore/homecore.yaml alice   # later: also signs the user out everywhere
+
+# Controller signing key: created on first start (or by this command). Put the printed public key
+# into `agent.trusted_controllers` of every agent that this Controller may shut down.
+sudo -u homecore homecore key show --config /etc/homecore/homecore.yaml
+# The same public key is at GET /api/v1/system/controller-key (any signed-in user).
 ```
 
 Notes

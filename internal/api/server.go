@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 
+	"github.com/thanhtunguet/homecore/internal/activity"
 	"github.com/thanhtunguet/homecore/internal/api/gen"
 	"github.com/thanhtunguet/homecore/internal/api/handlers"
 	"github.com/thanhtunguet/homecore/internal/api/middleware"
@@ -24,6 +25,7 @@ import (
 	"github.com/thanhtunguet/homecore/internal/auth"
 	"github.com/thanhtunguet/homecore/internal/commands"
 	"github.com/thanhtunguet/homecore/internal/config"
+	"github.com/thanhtunguet/homecore/internal/controllerkey"
 	"github.com/thanhtunguet/homecore/internal/devices"
 	"github.com/thanhtunguet/homecore/internal/httpx"
 	"github.com/thanhtunguet/homecore/internal/monitoring"
@@ -55,6 +57,9 @@ type Deps struct {
 	Commands *commands.Engine
 	Monitor  *monitoring.Monitor
 	Audit    *audit.Writer
+
+	ControllerKey *controllerkey.Key // GET /system/controller-key; nil answers 501
+	Activity      *activity.Service  // GET /activity; nil answers 501
 }
 
 // Server is the Controller HTTP server.
@@ -146,6 +151,7 @@ func newRouter(d Deps) (http.Handler, error) {
 	h := handlers.New(d.DB, d.Log)
 	h.Auth = d.Auth
 	h.Devices, h.Commands, h.Monitor, h.Audit = d.Devices, d.Commands, d.Monitor, d.Audit
+	h.ControllerKey, h.Activity = d.ControllerKey, d.Activity
 	h.Info = handlers.InfoSource{Mode: string(d.Mode), Controller: d.Config}
 	gen.HandlerWithOptions(h, gen.ChiServerOptions{
 		BaseRouter: r,

@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| Date | 2026-11-12 (first pass); resolution logs in §9 (second pass, same day), §10 (third pass, 2026-11-14, after the owner's decisions), §11 (Phase 1b, authentication) and §12 (Phase 2, devices and commands) |
+| Date | 2026-11-12 (first pass); resolution logs in §9 (second pass, same day), §10 (third pass, 2026-11-14, after the owner's decisions), §11 (Phase 1b, authentication) and §12 (Phase 2, devices and commands) and §13 (Phase 3, shutdown, agent status, activity) |
 | Scope | `frontend/` (git submodule, HomeCoreUI) wired to the Controller REST API (`api/openapi.yaml` 0.1.0) |
 | Related | [web-ui requirements](../requirements/web-ui.md), [ADR-009/010](../design/decisions.md), [changelog](../changelogs/2026-11-12-frontend-api-integration.md) |
-| Status | UI side wired and smoke-tested against a spec-conformant mock. Since Phase 2 the Controller implements auth, devices, probe, history, wake and commands (checked with `curl`, §12); **shutdown, metrics, controller key and DDNS still return 501**, and the UI itself has not been run in a browser against the real Controller. |
+| Status | UI side wired and smoke-tested against a spec-conformant mock. Since Phase 2 the Controller implements auth, devices, probe, history, wake and commands (checked with `curl`, §12); **shutdown, controller key and the activity feed are implemented since Phase 3 (§13); metrics and DDNS still return 501**, and the UI itself has not been run in a browser against the real Controller. |
 
 ## 1. Summary
 
@@ -250,3 +250,25 @@ Observations for the UI (no UI change made; `frontend/` untouched):
 - The generated TypeScript types in `frontend/src/api/generated` are stale by the spec edits (`400` on `listDevices`, `getDeviceHistory`, `listCommands`; `409` on `updateDevice`; two DDNS description quotes). They are response-code additions only, so nothing breaks, but `make ui-check` (`check:api`) will report drift until someone regenerates them in the submodule.
 - Timestamps have millisecond precision (`...:22.865Z`).
 - The error envelope code for `409` is `conflict`; for the throttle `rate_limited`.
+
+## 13. Resolution log: Phase 3, shutdown, agent status and activity (2026-11-14)
+
+Verified against the **real Controller and a real Agent** as two processes (built binary, temp data
+dirs, loopback ports, `curl`; the Agent ran with `dry_run: true`, so no machine was powered off; a
+Python TCP listener played the device's monitor port). The UI was **not** run in a browser. Details:
+[changelog](../changelogs/2026-11-14-phase-3-shutdown.md), [shutdown-agent.md](../requirements/shutdown-agent.md).
+
+| ID | Status | What the real Controller did |
+|----|--------|------------------------------|
+| GAP-API-09 ✅ | Closed at the API level | `agent.status`/`version`/`last_ok_at` are present on every bound device: `unknown` right after binding; `ready` with `version` and `last_ok_at` after a shutdown contact or the next health pass; `unreachable` with the agent stopped (a shutdown attempt answered `agent_unreachable`, `last_ok_at` unchanged). A restarted agent went `unreachable` to `ready` by the health job about one minute later (log `agent status changed`). `ready` only means the bound agent answered healthz: an agent that does not trust this Controller's key is still `ready` and the shutdown fails with `unauthorized` |
+| GAP-API-10 ✅ | Closed for shutdown | `POST /devices/{id}/shutdown`: `202` with the command; the agent's power controller ran once (`DRY RUN: would power off` in the agent log) and the command went `acknowledged`, then `completed` when the listener closed; a second request while active returned the same command id; a request within the same second `429`; an offline device answered `202` with a `completed` command and the agent log showed no request; no binding `409`; agent stopped `failed` / `agent_unreachable`; agent that does not trust the key `failed` / `unauthorized` with the Controller's `key_id` in the message |
+| GAP-API-05 ✅ | Closed at the API level | `GET /activity` (`listActivity`): newest first, `category` and `device_id` filters, opaque `next_cursor`; entries carry `at`, `actor`, `action`, `category`, `result`, `device_id`, `command_id` and a ready-made `message` (for example "Shutdown requested for wrongkey: failed (unauthorized)"). Only audited actions appear: no probes or monitor transitions |
+| GAP-BE-01 | Partly closed | Devices, probe, history, wake, shutdown, commands, controller key and activity are real; metrics and DDNS are still `501` |
+
+Observations for the UI (no UI change made; `frontend/` untouched):
+
+- `activity` is new in the spec: the generated TypeScript types in `frontend/src/api/generated` need regenerating in the submodule (`npm run gen:api`); `make ui-check` will report drift until then. Nothing existing breaks.
+- A shutdown the Controller could not deliver is still `202`; the failure is in the returned command (`status: failed`, `error_code`, `error`). The UI must read the command, not the HTTP status.
+- `agent.status` lags by up to one minute after a machine boots or an agent is bound; `ready` does not prove the Controller's key is trusted by that agent.
+- The Controller's public key for the agents' `trusted_controllers` is at `GET /system/controller-key`; the UI can show it with a copy button.
+
