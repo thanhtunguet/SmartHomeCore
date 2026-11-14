@@ -942,6 +942,15 @@ components:
         local_ips:
           type: array
           items: { type: string }
+        local_addresses:
+          type: array
+          description: Local unicast addresses paired with their network interface names; local_ips remains available for older clients.
+          items:
+            type: object
+            required: [interface_name, ip_address]
+            properties:
+              interface_name: { type: string }
+              ip_address: { type: string }
         cpu_cores: { type: integer }
         load_average:
           type: array

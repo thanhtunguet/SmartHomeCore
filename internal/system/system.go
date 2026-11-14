@@ -56,8 +56,11 @@ func (p RuntimeProvider) Collect(context.Context) (platform.Metrics, error) {
 	} else {
 		m.Restrict(platform.MetricProcessUptime)
 	}
-	if ips := LocalIPs(); len(ips) > 0 {
-		m.LocalIPs = ips
+	if addresses := LocalAddresses(); len(addresses) > 0 {
+		m.LocalAddresses = addresses
+		for _, address := range addresses {
+			m.LocalIPs = append(m.LocalIPs, address.IPAddress)
+		}
 	} else {
 		m.Restrict(platform.MetricLocalIPs)
 	}
@@ -69,14 +72,23 @@ func (p RuntimeProvider) Collect(context.Context) (platform.Metrics, error) {
 	return m, nil
 }
 
-// LocalIPs lists the unicast addresses of the up, non-loopback interfaces, sorted, link-local
-// excluded (an fe80:: address is no use to someone typing an address into a browser).
+// LocalIPs retains the legacy sorted list of addresses for existing callers.
 func LocalIPs() []string {
+	var ips []string
+	for _, address := range LocalAddresses() {
+		ips = append(ips, address.IPAddress)
+	}
+	return ips
+}
+
+// LocalAddresses lists unicast addresses of up, non-loopback interfaces, sorted by IP then name.
+// Link-local addresses are excluded, as they are not useful for accessing the Controller.
+func LocalAddresses() []platform.LocalAddress {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil
 	}
-	var out []string
+	var out []platform.LocalAddress
 	for _, ifc := range ifaces {
 		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
 			continue
@@ -85,19 +97,30 @@ func LocalIPs() []string {
 		if err != nil {
 			continue
 		}
-		for _, a := range addrs {
-			pfx, err := netip.ParsePrefix(a.String())
-			if err != nil {
-				continue
-			}
-			ip := pfx.Addr().Unmap()
-			if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsMulticast() || ip.IsUnspecified() {
-				continue
-			}
-			out = append(out, ip.String())
-		}
+		out = append(out, interfaceAddresses(ifc.Name, addrs)...)
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].IPAddress == out[j].IPAddress {
+			return out[i].InterfaceName < out[j].InterfaceName
+		}
+		return out[i].IPAddress < out[j].IPAddress
+	})
+	return out
+}
+
+func interfaceAddresses(name string, addrs []net.Addr) []platform.LocalAddress {
+	var out []platform.LocalAddress
+	for _, a := range addrs {
+		pfx, err := netip.ParsePrefix(a.String())
+		if err != nil {
+			continue
+		}
+		ip := pfx.Addr().Unmap()
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsMulticast() || ip.IsUnspecified() {
+			continue
+		}
+		out = append(out, platform.LocalAddress{InterfaceName: name, IPAddress: ip.String()})
+	}
 	return out
 }
 

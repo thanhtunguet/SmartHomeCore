@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1 |
-| Last reviewed | 2026-11-14 (Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
+| Last reviewed | 2026-11-14 (local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
 | Requirements | [requirements/overview.md](../requirements/overview.md) |
 | Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs) |
 | API contract | [api/openapi.yaml](../../api/openapi.yaml) (source of truth) |
@@ -374,7 +374,8 @@ POST /ddns/{id}/sync                                                      ┴─
 ### 6.10 System metrics (`internal/system`)
 `platform.MetricsProvider` (`Collect(ctx) (Metrics, error)`): memory (total/available/used), CPU %,
 core count, load average, uptime, kernel, disk usage of the data directory's file system, local IPs,
-process pid/uptime/RSS and Go runtime stats. Implemented in Phase 4 ([REQ-SYS-001..004](../requirements/ddns.md)):
+process pid/uptime/RSS and Go runtime stats. Local addresses retain their interface names; the API
+adds `local_addresses` while preserving the legacy `local_ips` list. Implemented in Phase 4 ([REQ-SYS-001..004](../requirements/ddns.md)):
 
 - `system.Gopsutil` (gopsutil v4, [ADR-016](decisions.md)) is built on `system.RuntimeProvider`
   (what the Go runtime knows). A metric gopsutil cannot read is named in `Metrics.Restricted`

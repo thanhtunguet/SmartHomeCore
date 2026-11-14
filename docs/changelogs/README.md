@@ -5,6 +5,8 @@ that spans days uses its end date). Newest entries are listed first below.
 
 | Date | Entry | Summary |
 |------|-------|---------|
+| 2026-11-14 | [2026-11-14-local-address-interfaces.md](2026-11-14-local-address-interfaces.md) | Show network interface names next to local IP addresses |
+| 2026-11-14 | [2026-11-14-disk-tooltip.md](2026-11-14-disk-tooltip.md) | Keep the disk path in a tooltip to prevent overflow |
 | 2026-11-14 | [2026-11-14-activity-feed-ui.md](2026-11-14-activity-feed-ui.md) | Activity screen wired to `GET /activity`, merged with command outcomes |
 | 2026-11-14 | [2026-11-14-phase-4-ddns-metrics.md](2026-11-14-phase-4-ddns-metrics.md) | Phase 4: public-IP quorum, Cloudflare client, DDNS configs and syncer with backoff, Cloudflare lookups, gopsutil system metrics, migration `0006` (ADR-016) |
 | 2026-11-14 | [2026-11-14-phase-3-shutdown.md](2026-11-14-phase-3-shutdown.md) | Phase 3 Controller side: sealed Controller key, signed shutdown dispatcher, agent status + health job, `GET /activity`, `homecore key show` (ADR-015) |

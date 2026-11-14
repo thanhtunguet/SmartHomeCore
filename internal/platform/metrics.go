@@ -19,6 +19,12 @@ const (
 	MetricProcessUptime = "process.uptime_seconds"
 )
 
+// LocalAddress associates a unicast IP with the interface that owns it.
+type LocalAddress struct {
+	InterfaceName string
+	IPAddress     string
+}
+
 // Metrics is a snapshot of the host running HomeCore. Zero values mean "not available", except
 // CPUPercent, where 0 % is a valid reading and absence is nil. Restricted names the metrics the
 // platform cannot provide (for example everything under /proc on Android), so clients can explain
@@ -43,7 +49,8 @@ type Metrics struct {
 	DiskFree  uint64
 	DiskUsed  uint64
 
-	LocalIPs []string
+	LocalIPs       []string
+	LocalAddresses []LocalAddress
 
 	PID                  int
 	ProcessUptimeSeconds int64

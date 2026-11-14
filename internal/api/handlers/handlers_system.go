@@ -52,6 +52,19 @@ func toAPIMetrics(m platform.Metrics) gen.SystemMetrics {
 	if len(m.LoadAverage) == 3 {
 		out.LoadAverage = ptr(append([]float64{}, m.LoadAverage...))
 	}
+	if len(m.LocalAddresses) > 0 {
+		addresses := make([]struct {
+			InterfaceName string `json:"interface_name"`
+			IpAddress     string `json:"ip_address"`
+		}, 0, len(m.LocalAddresses))
+		for _, address := range m.LocalAddresses {
+			addresses = append(addresses, struct {
+				InterfaceName string `json:"interface_name"`
+				IpAddress     string `json:"ip_address"`
+			}{InterfaceName: address.InterfaceName, IpAddress: address.IPAddress})
+		}
+		out.LocalAddresses = &addresses
+	}
 	if len(m.LocalIPs) > 0 {
 		out.LocalIps = ptr(append([]string{}, m.LocalIPs...))
 	}
