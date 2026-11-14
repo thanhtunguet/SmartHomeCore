@@ -21,6 +21,7 @@ Requirements: Go ≥ 1.26 (developed with 1.27). No CGO and no external services
 ```bash
 make run            # Controller on http://127.0.0.1:8080 with configs/dev.yaml
 open http://127.0.0.1:8080/api/docs/     # Swagger UI (offline)
+go run ./cmd/homecore user add --config configs/dev.yaml alice   # first account (prompts for the password; there is no default account)
 curl -s localhost:8080/readyz
 make test           # unit + integration tests
 make cross          # binaries for linux/{amd64,arm64,arm}, windows, darwin, android/arm64

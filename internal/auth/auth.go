@@ -1,11 +1,10 @@
-// Package auth handles users, password hashing, JWT access tokens, rotating refresh tokens and
-// authentication for the Controller REST API. There are no roles: every authenticated user is
-// equal (ADR-011).
+// Package auth handles users, password hashing (argon2id), HS256 JWT access tokens, rotating
+// refresh tokens with reuse detection and a short grace window, and authentication for the
+// Controller REST API. There are no roles: every authenticated user is equal (ADR-011).
 //
-// TODO(phase-1/2): argon2id password hashing, HS256 JWT issuing/verification with a dedicated
-// signing key (sealed in system_settings, distinct from agent keys), refresh token rotation with
-// family-based reuse detection, account management by the `homecore user` command (add, change
-// password; there is no first-run bootstrap), and the login/refresh/logout/me handlers.
+// Files: password.go (hashing), jwt.go (access tokens), store.go and accounts.go (users),
+// service.go (login, refresh, logout, signing key). Accounts are created by `homecore user add`;
+// there is no first-run bootstrap. Design: docs/design/architecture.md §10.1, ADR-013.
 package auth
 
 import (
@@ -27,8 +26,8 @@ type Authenticator interface {
 	Authenticate(ctx context.Context, bearerToken string) (Principal, error)
 }
 
-// RejectAll is the placeholder Authenticator used until JWT support lands: every protected
-// endpoint answers 401, so nothing is accidentally exposed.
+// RejectAll is the fail-closed Authenticator api.New falls back to when none is supplied (tests,
+// misconfiguration): every protected endpoint answers 401, so nothing is accidentally exposed.
 type RejectAll struct{}
 
 func (RejectAll) Authenticate(context.Context, string) (Principal, error) {

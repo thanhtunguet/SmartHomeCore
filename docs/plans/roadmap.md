@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | Brief §7 (phases), §8 (MVP); [architecture](../design/architecture.md) |
-| Last updated | 2026-11-14 (decisions: no roles, idempotent commands + throttle, Cloudflare lookups, user CLI) |
+| Last updated | 2026-11-14 (Phase 1b authentication done) |
 
 Legend: `[x]` done and verified · `[~]` partially done · `[ ]` not started.
 Tick items in the same change that completes them, and add a changelog entry.
@@ -14,7 +14,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 |-------|-------|--------|
 | 0 | Android compatibility spike (parallel to Phase 1) | Started: cross-compile verified |
 | 1 | Core foundation | **Done** |
-| 1b | JWT authentication (MVP; the brief places it under §3.1) | Next |
+| 1b | JWT authentication (MVP; the brief places it under §3.1) | **Done** |
 | 2 | Device management | Building blocks done |
 | 3 | Secure Agent | Agent side done; Controller side pending |
 | 4 | DDNS and system monitoring | Interfaces only |
@@ -23,11 +23,10 @@ Tick items in the same change that completes them, and add a changelog entry.
 
 ## Next up (ordered)
 
-1. **Phase 1b — JWT auth**: unblocks every protected endpoint.
-2. **Phase 2 — device CRUD + monitor job**: first user-visible feature.
-3. **Phase 2 — WOL command flow**: the MVP "wake" story end to end.
-4. **Phase 3 — Controller key management + dispatcher**: the MVP "shutdown" story end to end.
-5. **Phase 0 — on-device Android spike**: should not slip past Phase 2.
+1. **Phase 2 — device CRUD + monitor job**: first user-visible feature (authentication is in place).
+2. **Phase 2 — WOL command flow**: the MVP "wake" story end to end.
+3. **Phase 3 — Controller key management + dispatcher**: the MVP "shutdown" story end to end.
+4. **Phase 0 — on-device Android spike**: should not slip past Phase 2.
 
 ## Phase 0 — Android compatibility spike
 
@@ -54,16 +53,16 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [x] Static frontend serving with SPA fallback (REQ-API-005)
 - [x] Frontend submodule wired to the REST contract: login, devices, wake, shutdown, DDNS, activity, system; embedded build with placeholder fallback (REQ-UI-001..015, ADR-009/010). Verified against a mock only; re-run against the real Controller per phase
 
-## Phase 1b — Authentication
+## Phase 1b — Authentication ✅
 
-- [ ] argon2id password hashing (`golang.org/x/crypto/argon2`)
-- [ ] JWT signing key created and stored sealed in `system_settings`
-- [ ] `auth.JWT` Authenticator (HS256, 15 min access token) replacing `RejectAll`
-- [ ] Refresh-token rotation with family reuse detection and a short reuse **grace window** (about 10 s: a token presented again within it returns the already issued pair instead of revoking the family; the UI cannot serialise refreshes across tabs on plain HTTP, GAP-INF-01)
-- [ ] `homecore user add|passwd` command (works on the DB file, no running Controller needed; prompts for or reads the password from stdin) replacing the first-run bootstrap: no default account, nothing logged. Then remove `controller.auth.bootstrap_admin_user` from config and `HOMECORE_ADMIN_PASSWORD` from the docs (ADR-011)
-- [ ] Handlers: `login`, `refresh`, `logout`, `me`
-- [ ] `audit_log` writes for login success/failure
-- [ ] Tests: login rate limit (429), token expiry, refresh reuse → family revoked, reuse inside the grace window → same pair
+- [x] argon2id password hashing (`golang.org/x/crypto/argon2`) (REQ-AUTH-001..003)
+- [x] JWT signing key created and stored sealed in `system_settings` (REQ-AUTH-004)
+- [x] `auth.JWT` Authenticator (HS256, 15 min access token) replacing `RejectAll` (REQ-AUTH-005/006; `RejectAll` stays as the fail-closed default of `api.New`)
+- [x] Refresh-token rotation with family reuse detection and a short reuse **grace window** (REQ-AUTH-008..010) (about 10 s: a token presented again within it returns the already issued pair instead of revoking the family; the UI cannot serialise refreshes across tabs on plain HTTP, GAP-INF-01)
+- [x] `homecore user add|passwd|list` command (works on the DB file, no running Controller needed; no-echo prompt, stdin or `HOMECORE_PASSWORD`) replacing the first-run bootstrap: no default account, nothing logged; `controller.auth.bootstrap_admin_user` removed from config and docs (ADR-011, REQ-AUTH-015..018)
+- [x] Handlers: `login`, `refresh`, `logout`, `me` (REQ-AUTH-007..012)
+- [x] `audit_log` writes for login success/failure, logout, token reuse, account changes; reusable `internal/audit` writer (REQ-AUTH-014)
+- [x] Tests: login rate limit (429), token expiry, refresh reuse → family revoked, reuse inside the grace window → same pair
 
 ## Phase 2 — Device management
 
@@ -137,5 +136,8 @@ Tick items in the same change that completes them, and add a changelog entry.
 | Re-run the UI against the real Controller as Phases 1b/2/3/4 land (UI is verified only against a mock) | GAP-BE-01..03 |
 | Hostname field in the device form (once hostname-based probing exists) | GAP-API-15 |
 | Run the frontend checks (`make ui-check`) in CI once a CI pipeline exists | GAP-INF-06, 07, REQ-UI-016 |
-| User management beyond the CLI (list/disable users, UI for changing the password) | GAP-API-14 |
+| `homecore user disable\|enable\|delete` (the `users.disabled` flag is honoured but only settable with SQL); UI for changing the password | GAP-API-14, REQ-AUTH known gaps |
+| Cut off access tokens at logout/password change (token version or `jti` deny-list), if the 15 min window ever matters | REQ-AUTH known gaps |
+| Per-account login lockout (only per-IP limit exists); separate rate-limit bucket for `refresh`/`logout` | REQ-AUTH known gaps |
+| Account creation on Android (no CLI): decide in Phase 5 how the host app calls `auth.Accounts` through `mobile` | REQ-RT known gaps |
 | Release pipeline must run `make ui-build` before `make cross` | GAP-INF-10 |

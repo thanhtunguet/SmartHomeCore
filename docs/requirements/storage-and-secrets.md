@@ -25,13 +25,13 @@
 |----|-------------|--------|-------------|
 | REQ-SEC-001 | A 32-byte master key is resolved in this order: `HOMECORE_MASTER_KEY` (base64) → key supplied by the host (Android Keystore through `mobile.Start`) → `<data_dir>/master.key`. The key file is created exclusively, mode `0600`, and fsynced. A malformed key stops startup. | Implemented | `TestMasterKeyPersistsWithStrictPermissions` |
 | REQ-SEC-002 | Secrets are sealed with AES-256-GCM as `nonce ‖ ciphertext`, with associated data naming the column (e.g. `ddns_configs.api_token`). Opening fails on tampering or wrong associated data. | Implemented | `TestSealOpenBindsAssociatedData` |
-| REQ-SEC-003 | Secret material is stored only in sealed BLOB columns: `controller_keys.private_key_sealed`, `ddns_configs.api_token_sealed`, secret entries of `system_settings`. Refresh tokens are stored only as SHA-256 hashes. | **Partial.** Schema implemented; writers (auth, key management, DDNS) planned | Schema review |
+| REQ-SEC-003 | Secret material is stored only in sealed BLOB columns: `controller_keys.private_key_sealed`, `ddns_configs.api_token_sealed`, `refresh_tokens.successor_sealed` (short-lived, wiped after 10 s), secret entries of `system_settings` (the JWT key). Refresh tokens are stored only as SHA-256 hashes; passwords only as argon2id hashes. | **Partial.** Implemented for the JWT key, refresh tokens and passwords (Phase 1b); writers for the Controller key and DDNS tokens are planned | `TestSigningKeyIsGeneratedOnceSealedAndDistinctFromMasterKey`, `TestRefreshTokensAreStoredOnlyAsHashes`, `TestSealedSuccessorIsWipedAfterTheWindow` |
 | REQ-SEC-004 | API responses never contain secrets: devices have no secret fields; the DDNS `api_token` is `writeOnly` and reported only as `has_api_token`. | Implemented (spec) | `api/openapi.yaml` |
-| REQ-SEC-005 | The master key, the JWT signing key and the Controller Ed25519 signing key are distinct keys. | **Partial.** Master key exists; the other two are created when auth / key management land | Design |
+| REQ-SEC-005 | The master key, the JWT signing key and the Controller Ed25519 signing key are distinct keys. | **Partial.** Master key and JWT key exist as independent random values (REQ-AUTH-004); the Ed25519 key is created by Phase 3 key management | `TestSigningKeyIsGeneratedOnceSealedAndDistinctFromMasterKey` |
 
 ## Known gaps
 
-- Domain repositories (devices, commands, users, DDNS) do not exist yet; the tables are unused.
+- Domain repositories exist only for users and refresh tokens (`internal/auth`); devices, commands and DDNS are planned.
 - `Backup` has no test and no admin endpoint.
-- Retention pruning (`retention_days`) is configured but not implemented.
+- Retention pruning (`retention_days`) is configured but not implemented for devices, commands and DDNS; refresh tokens are pruned by the auth maintenance job (REQ-AUTH-013).
 - SQLite has not been run on a real Android device (Phase 0 spike).

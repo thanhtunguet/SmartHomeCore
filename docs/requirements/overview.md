@@ -33,7 +33,7 @@ One build supports both roles; configuration selects `controller`, `agent` or `b
 | G-4 | Maximum shared business logic between Android and Linux | **Partial.** One Go module; gomobile binding surface exists; AAR not built yet. |
 | G-5 | Easy to cross-compile, deploy and maintain | **Met.** `CGO_ENABLED=0` builds for 7 targets (`make cross`). |
 | G-6 | REST API documented with OpenAPI and Swagger UI at `/api/docs` | **Met.** Spec-first, offline Swagger UI. |
-| G-7 | Home-appropriate security without creating a remote-control hole | **Partial.** Agent security done; JWT auth pending. |
+| G-7 | Home-appropriate security without creating a remote-control hole | **Partial.** Agent security and JWT authentication done; Controller key management (Phase 3) pending. |
 
 ## 3. Platforms
 
@@ -56,7 +56,7 @@ One build supports both roles; configuration selects `controller`, `agent` or `b
 | Wake-on-LAN | **Partial.** Packet library done; API and command flow pending | Phase 2 |
 | Secure shutdown Agent on Linux | **Implemented** (agent side); Controller dispatch pending | [shutdown-agent.md](shutdown-agent.md) |
 | SQLite | **Implemented** | [storage-and-secrets.md](storage-and-secrets.md) |
-| JWT authentication | **Partial.** Authentication enforced, no roles (ADR-011); token issuing/verification pending | [http-api.md](http-api.md) |
+| JWT authentication | **Implemented** (Phase 1b): argon2id, HS256 access tokens, rotating refresh tokens with reuse detection and grace window, `homecore user` CLI; no roles (ADR-011) | [authentication.md](authentication.md) |
 | Cloudflare DDNS | **Planned** | Phase 4 |
 | Swagger UI at `/api/docs` | **Implemented** | [http-api.md](http-api.md) |
 | Static file serving | **Implemented** (UI embedded via `make build-full`; placeholder otherwise) | [http-api.md](http-api.md), [web-ui.md](web-ui.md) |
@@ -76,6 +76,7 @@ has a stable ID, a status and the test that verifies it.
 |----------|--------|--------------|
 | [runtime-and-configuration.md](runtime-and-configuration.md) | `REQ-RT` | §1 roles, §2, §5 modes |
 | [http-api.md](http-api.md) | `REQ-API` | §3.1, §4, §6 (API zone) |
+| [authentication.md](authentication.md) | `REQ-AUTH` | §3.1 (JWT), §6.1, §6.6, §6.7 (audit) |
 | [storage-and-secrets.md](storage-and-secrets.md) | `REQ-ST`, `REQ-SEC` | §3.7, §6 (secrets) |
 | [shutdown-agent.md](shutdown-agent.md) | `REQ-AG` | §3.5, §6 (agent zone) |
 | [web-ui.md](web-ui.md) | `REQ-UI` | §3.1 (static frontend), UI for §3.3–3.6 |
@@ -118,7 +119,7 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 | # | Brief point | Status | Ref |
 |---|-------------|--------|-----|
 | 3.1.1 | REST API with JSON | Implemented | REQ-API-001 |
-| 3.1.2 | JWT authentication and authorization | Partial (authorization done, JWT pending) | REQ-API-007, REQ-API-008 |
+| 3.1.2 | JWT authentication and authorization | Implemented (authentication; authorization = any authenticated user, ADR-011) | REQ-API-007, REQ-API-008, REQ-AUTH-004..012 |
 | 3.1.3 | Swagger UI at `/api/docs` | Implemented | REQ-API-003 |
 | 3.1.4 | OpenAPI spec at `/api/openapi.json` | Implemented | REQ-API-002 |
 | 3.1.5 | Static frontend serving | Implemented (UI wired to the API; backend endpoints pending) | REQ-API-005, REQ-UI-001..004 |
@@ -199,7 +200,7 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 | 3.7.3 | `busy_timeout` | Implemented | REQ-ST-002 |
 | 3.7.4 | Versioned schema migrations | Implemented | REQ-ST-003 |
 | 3.7.5 | Transactions for important changes | Implemented (`WithTx`) | REQ-ST-004 |
-| 3.7.6 | No plaintext secrets | Implemented (sealing library + sealed BLOB columns) | REQ-SEC-001..003 |
+| 3.7.6 | No plaintext secrets | Implemented (sealing library + sealed BLOB columns; passwords argon2id, refresh tokens SHA-256) | REQ-SEC-001..003, REQ-AUTH-001, REQ-AUTH-008 |
 | 3.7.7 | Consistent backup | Implemented (untested), no API yet | REQ-ST-006 |
 | 3.7.8 | Test SQLite on Android arm64 via gomobile early | Partial (cross-compile verified; on-device pending) | ADR-004, Phase 0 |
 
@@ -215,7 +216,7 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 
 | # | Brief point | Status | Ref |
 |---|-------------|--------|-----|
-| 4.1 | All draft endpoints (auth, devices, wake/shutdown/probe/history, metrics, DDNS, commands, docs) | Specified in `api/openapi.yaml`; only health and docs implemented, the rest return 501 (or 401 without a token) | REQ-API-006 |
+| 4.1 | All draft endpoints (auth, devices, wake/shutdown/probe/history, metrics, DDNS, commands, docs) | Specified in `api/openapi.yaml`; health, docs, `/auth/*` and `/system/info` implemented; the rest return 501 with a valid token (401 without) | REQ-API-006 |
 | 4.2 | Wake/shutdown create a `command_id`; HTTP does not wait for the machine | Specified (`202` + `Command`); dedup enforced in DB | REQ-ST-005 |
 
 ### §5 Source code architecture
@@ -232,14 +233,14 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 
 | # | Brief point | Status | Ref |
 |---|-------------|--------|-----|
-| 6.1 | Public API: JWT + roles | Partial; **roles dropped** (ADR-011) | REQ-API-007, REQ-API-008 |
+| 6.1 | Public API: JWT + roles | Implemented; **roles dropped** (ADR-011) | REQ-API-007, REQ-API-008, REQ-AUTH-* |
 | 6.2 | Agent listener: signature + allowlist only | Implemented | REQ-AG-* |
 | 6.3 | Swagger UI grants no permission | Implemented | REQ-API-003 |
 | 6.4 | Cloudflare client with scoped token | Planned | Phase 4 |
 | 6.5 | Never expose the Agent to the Internet; prefer VPN | Documented (`deploy/README.md`, config comments) | REQ-AG-012 |
-| 6.6 | JWT secret ≠ Agent secret | Implemented by design (separate keys; JWT key not created yet) | REQ-SEC-005 |
-| 6.7 | Shutdown requires admin and writes audit log | **Changed:** no roles (ADR-011), any authenticated user; `audit_log` table ready, writing pending | REQ-API-008 |
-| 6.8 | Private keys and Cloudflare tokens protected at rest | Partial (sealer implemented; not yet wired to keys/tokens) | REQ-SEC-002 |
+| 6.6 | JWT secret ≠ Agent secret | Implemented (JWT key generated and sealed separately; the Controller Ed25519 key arrives in Phase 3) | REQ-AUTH-004, REQ-SEC-005 |
+| 6.7 | Shutdown requires admin and writes audit log | **Changed:** no roles (ADR-011), any authenticated user. `audit_log` writer exists (`internal/audit`, used by login/logout/account changes); the shutdown entry arrives with Phase 3 | REQ-API-008, REQ-AUTH-014 |
+| 6.8 | Private keys and Cloudflare tokens protected at rest | Partial (sealer implemented; used for the JWT key and refresh-grace copies; Controller key and DDNS tokens pending) | REQ-SEC-002, REQ-AUTH-004 |
 | 6.9 | Acknowledge before executing shutdown | Implemented | REQ-AG-009 |
 | 6.10 | Agent only runs predefined commands | Implemented | REQ-AG-005 |
 | 6.11 | Agent runs with least privilege | Implemented (polkit + hardened systemd unit; host validation pending) | REQ-AG-011 |

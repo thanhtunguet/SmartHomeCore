@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/thanhtunguet/homecore/internal/api/gen"
+	"github.com/thanhtunguet/homecore/internal/auth"
 	"github.com/thanhtunguet/homecore/internal/config"
 	"github.com/thanhtunguet/homecore/internal/httpx"
 	"github.com/thanhtunguet/homecore/internal/storage"
@@ -20,6 +21,7 @@ type Handlers struct {
 	gen.Unimplemented
 
 	DB   *storage.DB
+	Auth *auth.Service // nil: the auth operations answer 501
 	Log  *slog.Logger
 	Now  func() time.Time
 	Info InfoSource // what GET /system/info reports; set by the router

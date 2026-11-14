@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Engine | SQLite 3 (embedded) via `modernc.org/sqlite` (pure Go, [ADR-004](decisions.md#adr-004--sqlite-driver-moderncorgsqlite-everywhere)) |
-| Schema version | `3` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`, `0003_users_no_roles.sql`) |
+| Schema version | `4` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`, `0003_users_no_roles.sql`, `0004_refresh_grace.sql`) |
 | Owner role | Controller only. The Agent has no database |
 | Requirements | [storage-and-secrets.md](../requirements/storage-and-secrets.md) |
 | Last reviewed | 2026-11-14 |
@@ -84,14 +84,16 @@ Accounts for the REST API. No roles (ADR-011): migration `0003` dropped the `rol
 |--------|------|------|---------|-------------------|
 | `id` | TEXT | no | | PK, UUIDv7 |
 | `username` | TEXT | no | | `UNIQUE COLLATE NOCASE` |
-| `password_hash` | TEXT | no | | argon2id encoded string (planned) |
+| `password_hash` | TEXT | no | | argon2id PHC string `$argon2id$v=19$m=…,t=…,p=…$salt$key`; parameters travel with the hash, so they can be raised and old hashes are upgraded at the next login |
 | `disabled` | INTEGER | no | `0` | bool |
 | `created_at`, `updated_at` | INTEGER | no | | unix ms |
 
 ### refresh_tokens
 
 Rotating refresh tokens. Using a token marks it `used_at` and issues a new one in the same
-`family_id`. Presenting an already-used token revokes the whole family (theft detection).
+`family_id`. Presenting an already-used token revokes the whole family (theft detection), except
+within the 10 s grace window, where the already issued successor pair is returned (see
+`successor_sealed`). Flow and states: [architecture §10.1](architecture.md#101-authentication-design).
 
 | Column | Type | Null | Constraint / note |
 |--------|------|------|-------------------|
@@ -102,8 +104,11 @@ Rotating refresh tokens. Using a token marks it `used_at` and issues a new one i
 | `expires_at` | INTEGER | no | |
 | `used_at`, `revoked_at` | INTEGER | yes | |
 | `created_at` | INTEGER | no | |
+| `successor_sealed` | BLOB | yes | migration `0004`. JSON `{access token, refresh token, access expiry}` of the pair issued when this row was rotated, sealed with AES-GCM, AAD `refresh_tokens.successor`. Set at rotation, set to `NULL` at the next rotation of the family, when the family is revoked, and by the maintenance job once `used_at` is older than 10 s. Non-`NULL` only on a used row inside the grace window; never holds anything for longer |
 
 Indexes: `refresh_tokens_user (user_id)`, `refresh_tokens_family (family_id)`.
+
+Revoking a family sets `revoked_at` on every row of it. Rows are deleted by `auth.Service.Maintain`: expired or revoked more than 24 h ago, or rotated (used) more than 7 days ago.
 
 ### devices
 
@@ -204,7 +209,7 @@ Indexes:
 
 ### audit_log
 
-Append-only record of security-relevant actions (login, shutdown, key rotation, config changes).
+Append-only record of security-relevant actions (login, shutdown, key rotation, config changes). Written by `internal/audit`. Actions today: `auth.login` (`result` `ok`/`failed`; failure reason in `details`), `auth.logout`, `auth.refresh_reuse` (`revoked`), `user.create`, `user.password_change` (`actor` `cli`). A failed login stores `actor`/`actor_user_id` only when the submitted username is an existing account.
 
 | Column | Type | Null | Default | Note |
 |--------|------|------|---------|------|
@@ -264,7 +269,7 @@ Key/value store for Controller-wide settings.
 
 | Column | Type | Null | Note |
 |--------|------|------|------|
-| `key` | TEXT | no | PK, e.g. `auth.jwt_signing_key` |
+| `key` | TEXT | no | PK. Used today: `auth.jwt_signing_key` (32-byte HS256 key, sealed, created at first start) |
 | `value` | BLOB | no | secret values sealed with AAD `system_settings.<key>` |
 | `updated_at` | INTEGER | no | |
 
@@ -285,7 +290,7 @@ Created by the migration runner (not by a migration file).
 | `device_status_history` | per transition | pruned after `controller.retention_days` (default 30) |
 | `commands` (terminal) | per wake/shutdown | pruned after `retention_days` |
 | `ddns_sync_history` | per sync attempt | pruned after `retention_days` |
-| `refresh_tokens` | per login/refresh | delete expired or revoked rows |
+| `refresh_tokens` | per login/refresh | implemented by `auth.Service.Maintain` (every minute): expired or revoked > 24 h, rotated > 7 days; sealed successor copies wiped after 10 s |
 | `audit_log` | per privileged action | kept (small); export/prune is a future admin feature |
 
 The retention job is part of Phase 2 (see the [roadmap](../plans/roadmap.md)).

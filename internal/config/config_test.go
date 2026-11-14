@@ -40,10 +40,11 @@ agent:
 
 func TestLoadBytesRejectsUnknownFieldsAndBadValues(t *testing.T) {
 	cases := map[string]string{
-		"unknown field": "mdoe: agent\n",
-		"bad mode":      "mode: server\n",
-		"bad action":    "mode: agent\nagent:\n  allowed_actions: [rm-rf]\n",
-		"same listener": "mode: both\ncontroller:\n  listen: \":8080\"\nagent:\n  listen: \":8080\"\n",
+		"unknown field":         "mdoe: agent\n",
+		"bad mode":              "mode: server\n",
+		"bad action":            "mode: agent\nagent:\n  allowed_actions: [rm-rf]\n",
+		"removed bootstrap key": "controller:\n  auth:\n    bootstrap_admin_user: admin\n", // ADR-011: accounts come from `homecore user add`
+		"same listener":         "mode: both\ncontroller:\n  listen: \":8080\"\nagent:\n  listen: \":8080\"\n",
 	}
 	for name, yml := range cases {
 		t.Run(name, func(t *testing.T) {

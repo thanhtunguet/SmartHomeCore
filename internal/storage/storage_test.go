@@ -115,3 +115,27 @@ func TestUsersHaveNoRoleColumn(t *testing.T) {
 		t.Fatalf("role column still present (n=%d, err=%v)", n, err)
 	}
 }
+
+// Migration 0004: the sealed copy of the successor pair lives on the (used) refresh token row and
+// is nullable, so tokens issued before the migration and unused tokens carry none.
+func TestRefreshTokensHaveNullableSuccessorColumn(t *testing.T) {
+	ctx := context.Background()
+	db := openTemp(t)
+	if _, err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES ('u1', 'alice', 'h', 0, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO refresh_tokens (id, user_id, family_id, token_hash, expires_at, created_at)
+		VALUES ('r1', 'u1', 'f1', x'01', 1, 0)`); err != nil {
+		t.Fatalf("insert without successor_sealed: %v", err)
+	}
+	var sealed []byte
+	if err := db.QueryRowContext(ctx, `SELECT successor_sealed FROM refresh_tokens WHERE id = 'r1'`).Scan(&sealed); err != nil || sealed != nil {
+		t.Fatalf("successor_sealed = %v, err %v; want NULL", sealed, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE refresh_tokens SET successor_sealed = x'0a0b' WHERE id = 'r1'`); err != nil {
+		t.Fatal(err)
+	}
+}

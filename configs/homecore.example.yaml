@@ -18,12 +18,11 @@ controller:
   api_docs: true            # serve /api/openapi.json and /api/docs (Swagger UI, offline)
   trusted_proxies: []       # CIDRs of reverse proxies whose X-Forwarded-For is trusted, e.g. ["127.0.0.1/32"]
   cors_allowed_origins: []  # exact origins; empty = same-origin only
-  auth:
+  auth:                     # accounts are created with `homecore user add <username>` (no default account)
     access_token_ttl: 15m
     refresh_token_ttl: 720h
     login_rate_per_minute: 10
     api_rate_per_minute: 600
-    bootstrap_admin_user: admin   # to be removed in Phase 1b: accounts will be created with `homecore user add` (ADR-011)
   monitor:
     tick: 5s
     default_interval: 30s

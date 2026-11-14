@@ -43,7 +43,8 @@ type Deps struct {
 	ShutdownTimeout time.Duration
 	Log             *slog.Logger
 	DB              *storage.DB
-	Authn           auth.Authenticator
+	Authn           auth.Authenticator // defaults to Auth, then to auth.RejectAll
+	Auth            *auth.Service      // login/refresh/logout/me; nil answers 501
 }
 
 // Server is the Controller HTTP server.
@@ -55,6 +56,9 @@ type Server struct {
 // New builds the router. It fails if the embedded spec cannot be loaded or contains a security
 // requirement the middleware does not understand.
 func New(d Deps) (*Server, error) {
+	if d.Authn == nil && d.Auth != nil {
+		d.Authn = d.Auth
+	}
 	if d.Authn == nil {
 		d.Authn = auth.RejectAll{}
 	}
@@ -130,6 +134,7 @@ func newRouter(d Deps) (http.Handler, error) {
 	}
 
 	h := handlers.New(d.DB, d.Log)
+	h.Auth = d.Auth
 	h.Info = handlers.InfoSource{Mode: string(d.Mode), Controller: d.Config}
 	gen.HandlerWithOptions(h, gen.ChiServerOptions{
 		BaseRouter: r,

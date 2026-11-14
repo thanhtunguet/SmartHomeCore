@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Date | 2026-11-12 (first pass); resolution logs in §9 (second pass, same day) and §10 (third pass, 2026-11-14, after the owner's decisions) |
+| Date | 2026-11-12 (first pass); resolution logs in §9 (second pass, same day), §10 (third pass, 2026-11-14, after the owner's decisions) and §11 (Phase 1b, authentication) |
 | Scope | `frontend/` (git submodule, HomeCoreUI) wired to the Controller REST API (`api/openapi.yaml` 0.1.0) |
 | Related | [web-ui requirements](../requirements/web-ui.md), [ADR-009/010](../design/decisions.md), [changelog](../changelogs/2026-11-12-frontend-api-integration.md) |
 | Status | UI side wired and smoke-tested against a spec-conformant mock. **Controller business endpoints still return 501**, so the end-to-end path against the real Controller is not yet possible. |
@@ -49,7 +49,7 @@ Code map: `frontend/src/api/` (client, endpoints, mappers, wire types), `context
 |----|-----|---------|----------|--------|
 | GAP-BE-01 | High | No operation except health/docs is implemented | `curl -X POST /api/v1/auth/login` → `501`; `GET /api/v1/devices` → `401` with any token | Roadmap Phase 1b (JWT), Phase 2 (devices, commands), Phase 3 (controller key, shutdown), Phase 4 (DDNS, metrics) |
 | GAP-BE-02 ✅ | High | `501` responses have an **empty body**, not the error envelope that REQ-API-001 promises for every error | `curl -i` shows `HTTP/1.1 501` with `Content-Length: 0` (no `Content-Type`) | Make `gen.Unimplemented` answer through `httpx.WriteError(…, "not_implemented", …)`. The UI already copes (it falls back to the status text) |
-| GAP-BE-03 | High | Login cannot succeed, so the UI stops at the login screen with the message "Sign-in is not implemented on this Controller yet" | Real-Controller smoke test (§7) | Phase 1b |
+| GAP-BE-03 ✅ | High | Login cannot succeed, so the UI stops at the login screen with the message "Sign-in is not implemented on this Controller yet" | Real-Controller smoke test (§7) | Phase 1b |
 
 Until these land, the full flow was exercised only against a mock (§7). **Re-run the UI smoke test
 against the real Controller as each phase completes**; the mock encodes my reading of the spec, not
@@ -100,7 +100,7 @@ Fixed in this change unless stated otherwise.
 
 | ID | Sev | Finding | Notes / recommendation |
 |----|-----|---------|------------------------|
-| GAP-INF-01 ◐ | Medium | **Refresh-token rotation vs. multiple tabs.** Rotation with reuse detection revokes the whole family if two tabs refresh with the same token. The UI shares one session in `localStorage` and serialises refresh with the Web Locks API, but `navigator.locks` exists only in **secure contexts**, and the Controller is normally reached over plain `http://192.168.x.x` | On plain HTTP the lock is unavailable (the code falls back to the shared-storage check, which narrows but does not close the race). Give the Controller a short reuse **grace window** (e.g. 10 s) when it implements refresh rotation (Phase 1b) |
+| GAP-INF-01 ✅ | Medium | **Refresh-token rotation vs. multiple tabs.** Rotation with reuse detection revokes the whole family if two tabs refresh with the same token. The UI shares one session in `localStorage` and serialises refresh with the Web Locks API, but `navigator.locks` exists only in **secure contexts**, and the Controller is normally reached over plain `http://192.168.x.x` | On plain HTTP the lock is unavailable (the code falls back to the shared-storage check, which narrows but does not close the race). Give the Controller a short reuse **grace window** (e.g. 10 s) when it implements refresh rotation (Phase 1b) |
 | GAP-INF-02 | Medium | Tokens are in `localStorage` (XSS-readable). The API has no cookie flow | Accepted for a LAN appliance, mitigated by the strict CSP; recorded as [ADR-010](../design/decisions.md). Revisit if the Controller is exposed to the Internet |
 | GAP-INF-03 | Low | Same secure-context limit affects the **clipboard API**: "Copy" buttons for the controller key do nothing over plain HTTP | The key is rendered as selectable text; consider enabling TLS on the Controller (`controller.tls`) for the UI |
 | GAP-INF-04 ✅ | Low | Static handler sends no `Cache-Control`/`ETag` (embedded files have a zero mod-time, so no `Last-Modified` either) | Add `immutable` for `/assets/*` (hashed names) and `no-cache` for `index.html` |
@@ -194,12 +194,32 @@ The maintainers answered the open questions of the first list. Decisions are rec
 | GAP-API-09 | Spec and UI done; dispatcher pending (Phase 3) | `AgentBinding.status`, `version`, `last_ok_at` (REQ-API-021); the UI uses them when present and labels the old inference otherwise |
 | GAP-API-02 | Spec and UI done; Cloudflare client pending (Phase 4) | `POST /ddns/cloudflare/zones` and `.../records`, `record_id` required (REQ-API-020); dropdowns are the only way to pick zone and record (no manual entry: a token that can edit DNS can read it). Until Phase 4 DDNS records cannot be created from the UI |
 | GAP-API-05 | Recorded, not started | `GET /activity` is a Phase 3 roadmap item; not in the spec until it has a use |
-| GAP-API-14 | Deferred, with a plan | `homecore user add\|passwd` command in Phase 1b replaces the first-run bootstrap (REQ-API-022); no API or UI |
+| GAP-API-14 | Command done (Phase 1b, §11); rest deferred | `homecore user add\|passwd\|list` replaces the first-run bootstrap (REQ-API-022, REQ-AUTH-015..018); no API or UI for account management |
 | GAP-API-15 | Deferred | Waits for hostname-based probing |
 | GAP-INF-06 | Closed | Wire types generated by `openapi-typescript` (workspace `tools/apigen`, TypeScript 5), `check:api` detects drift, a contract test ties every endpoint the UI calls to the spec (REQ-UI-016) |
 | GAP-INF-07 | Partly closed | 110 unit/contract tests (`make ui-test`). Not covered: React components and flows; no end-to-end run against the real Controller (owner tests manually) |
 | GAP-INF-08, 09, 10; GAP-INF-02, 03, 05 | Unchanged | Still open or accepted as before. INF-08: the submodule commits are still local |
 
-Still open: GAP-BE-01, BE-03 (Phases 1b–4), the ◐ items waiting for handlers (GAP-API-01, 03, 04, 07, 08, 09, 02), GAP-INF-01 (Phase 1b), GAP-API-05, 14, 15, GAP-INF-02, 03, 05, 08, 09, 10.
+Still open (state after the third pass; Phase 1b closed GAP-BE-03 and GAP-INF-01, see §11): GAP-BE-01 (Phases 2–4), the ◐ items waiting for handlers (GAP-API-01, 03, 04, 07, 08, 09, 02), GAP-API-05, 14, 15, GAP-INF-02, 03, 05, 08, 09, 10.
 After the Phase 2/3/4 handlers land, re-run the UI against the real Controller for every ◐ item and flip it to ✅.
+
+## 11. Resolution log: Phase 1b, authentication (2026-11-14)
+
+Verified against the **real Controller** (built binary, temp data dir, `curl`; see the
+[changelog](../changelogs/2026-11-14-phase-1b-authentication.md)). The UI itself was **not** run in a
+browser against it; what follows is the HTTP contract the UI depends on.
+
+| ID | Status | Resolution |
+|----|--------|------------|
+| GAP-BE-03 ✅ | Closed at the API level | `POST /auth/login` returns `{access_token, refresh_token, token_type: "Bearer", expires_in: 900}`; `GET /auth/me` returns `{id, username}`; a protected, not yet implemented operation answers `501` with a valid token and `401` without. Wrong password and unknown user return the same `401` envelope (`unauthorized`, "invalid username or password"). Remaining UI-side check: the login screen no longer shows "Sign-in is not implemented" (not exercised in a browser) |
+| GAP-INF-01 ✅ | Closed at the API level | A rotated refresh token presented again within 10 s returns the **same** pair (checked with two consecutive `curl` refreshes of one token: identical refresh and access token); after the window the replay returns `401` and the whole family is revoked, including the successor. Two real browser tabs were not tried |
+| GAP-API-14 | Command done | `homecore user add\|passwd\|list` works against the DB while the Controller runs |
+| GAP-BE-01 | Still open | Devices, commands, metrics, DDNS and controller key remain `501` (Phases 2-4) |
+
+Behaviour the UI should know (no UI change needed, none made; `frontend/` untouched):
+
+- `POST /auth/*` shares one per-IP bucket (10/min, burst 5). A burst of logins plus refreshes from one address (several tabs, one NAT) can get `429 rate_limited` with `Retry-After: 60`; the smoke test hit it after six auth calls in about 15 s.
+- `logout` needs a valid (unexpired) access token (`security: bearerAuth`); with an expired one it is a `401` from the middleware, so the UI should refresh first or just drop the session locally.
+- The access token stays valid after logout until `exp` (at most 15 min).
+- All failed refreshes (unknown, expired, revoked, reused) are the same `401`; the UI should treat any `401` from `/auth/refresh` as "session ended".
 

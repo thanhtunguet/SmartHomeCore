@@ -214,3 +214,49 @@ mashing.
 restart, which is acceptable. A refresh of the agent-protocol retry policy
 ([agent-protocol §5](agent-protocol.md#5-controller-behaviour)) follows from this ADR.
 
+
+---
+
+## ADR-013 — Authentication implementation: argon2id, stdlib HS256 JWT, refresh grace window
+
+**Context.** Phase 1b needs password storage, access/refresh tokens and a way to create the first
+account (ADR-011 removed the bootstrap). The Controller runs on small devices (Raspberry Pi,
+Android TV boxes), the UI cannot serialise refreshes across tabs on plain HTTP (ADR-010,
+GAP-INF-01), and dependencies must stay few (AGENTS.md).
+
+**Decision.**
+- **Passwords: argon2id** via `golang.org/x/crypto/argon2` (the only new dependency; approved). Cost
+  `m=32 MiB, t=3, p=1`: above the OWASP minimum for argon2id, about a quarter to half a second on a
+  Pi 4, at most two hashes at once (64 MiB peak). The PHC string carries the parameters; hashes are
+  upgraded at the next login. Rejected: bcrypt (72-byte limit, not memory-hard), scrypt (no standard
+  encoded form in the stdlib ecosystem we use).
+- **JWT without a library.** HS256 with `crypto/hmac`; about 150 lines including strict header
+  pinning (exactly `alg=HS256`, no extra header members) so `alg=none` and algorithm confusion
+  cannot occur. Single issuer and verifier, one symmetric key, no `kid`, no key sets, so a general
+  library would only add attack surface. The key is random, sealed in `system_settings`, distinct
+  from the master key and the Controller Ed25519 key.
+- **Revocation of access tokens by lookup, not by versioning.** Each request reads the user row, so a
+  disabled or deleted account is rejected immediately. Token versions or a `jti` deny-list would
+  add state for little gain at < 10 users. Consequence accepted: logout and password change do not
+  cut off an access token before `exp` (≤ 15 min); they revoke refresh tokens.
+- **Refresh tokens: opaque, SHA-256 at rest, rotation with family reuse detection, plus a 10 s
+  grace window.** Inside the window a replayed (already rotated) token returns the pair that was
+  issued for it, instead of revoking the family. To return it without keeping a plaintext refresh
+  token, the pair is stored sealed (AES-GCM, master key) on the used row (`successor_sealed`,
+  migration `0004`) and wiped when the window ends. Rejected: re-minting a different successor
+  (would fork the family and break reuse detection), a longer window (widens theft exposure), and
+  storing the refresh token in plaintext or as a reversible value without sealing.
+- **Login: one verification for every outcome** (dummy hash for unknown users), identical generic
+  `401`, reason only in `audit_log`; the submitted username is audited only if it names an account.
+- **First account: `homecore user add|passwd|list`** working on the DB file; password from
+  `HOMECORE_PASSWORD`, stdin, or a no-echo prompt. No-echo uses `golang.org/x/sys` (termios, Windows
+  console mode) in `internal/platform/tty` because `golang.org/x/term` is not an approved
+  dependency; `golang.org/x/sys` moved from an indirect to a direct dependency (already in `go.mod`).
+  Minimum password length 12 (`auth.MinPasswordLength`).
+
+**Consequences.** `go.mod` gains `golang.org/x/crypto` (and `go mod` raised the indirect
+`golang.org/x/text`). The 10 s window lets a thief who replays a just-rotated token obtain the same
+pair as the legitimate client; reuse after the window is still detected. The grace window is a
+constant, not a config key. The JWT key cannot be rotated without signing everybody out.
+Supersedes the "JWT" and "login hygiene" lines of the earlier design notes only in detail, not in
+direction (ADR-010, ADR-011 stand).

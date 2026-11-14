@@ -19,6 +19,7 @@ docs/
 | [overview.md](requirements/overview.md) | Product summary, goals, platforms, MVP scope, non-goals, **brief traceability matrix** |
 | [runtime-and-configuration.md](requirements/runtime-and-configuration.md) | `REQ-RT`: modes, configuration, lifecycle, logging, mobile bindings, cross-compile |
 | [http-api.md](requirements/http-api.md) | `REQ-API`: REST foundation, docs, health, authN/authZ, middleware |
+| [authentication.md](requirements/authentication.md) | `REQ-AUTH`: passwords, JWT, refresh rotation and grace window, audit, `homecore user` |
 | [storage-and-secrets.md](requirements/storage-and-secrets.md) | `REQ-ST`, `REQ-SEC`: SQLite, migrations, master key, sealing |
 | [shutdown-agent.md](requirements/shutdown-agent.md) | `REQ-AG`: signed commands, replay protection, least-privilege execution |
 | [web-ui.md](requirements/web-ui.md) | `REQ-UI`: frontend submodule, embedded build, session, flows against the REST API |

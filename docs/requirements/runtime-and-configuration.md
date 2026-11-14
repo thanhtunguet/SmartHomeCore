@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Brief | §1 (roles, one build), §2, §5 ("One binary, several roles") |
-| Code | `cmd/homecore`, `internal/app`, `internal/config`, `internal/logging`, `internal/httpx`, `internal/version`, `mobile` |
+| Code | `cmd/homecore` (`main.go`, `user.go`), `internal/app`, `internal/config`, `internal/logging`, `internal/httpx`, `internal/version`, `mobile` |
 | Design | [architecture §4](../design/architecture.md#4-runtime-model) |
 | Status | **Implemented** |
 
@@ -22,6 +22,8 @@
 | REQ-RT-009 | Data directory layout: `<data_dir>/homecore.db` (Controller DB), `<data_dir>/master.key`, `<agent.data_dir>/agent_id` (default `<data_dir>/agent`). Directories are created with mode `0700`, secret files with `0600`. | Implemented | `TestMasterKeyPersistsWithStrictPermissions`; manual permission check |
 | REQ-RT-010 | The binary builds with `CGO_ENABLED=0` for linux/amd64, linux/arm64, linux/arm, windows/amd64, darwin/arm64, darwin/amd64 and android/arm64 (`make cross`). | Implemented | `make cross` 2026-11-11 |
 
+| REQ-RT-011 | `homecore user add\|passwd\|list` subcommands share the server's configuration loading (`--config`, `--data-dir`, `HOMECORE_*`) and operate on the same `<data_dir>/homecore.db`; see [REQ-AUTH-015..018](authentication.md). The key `controller.auth.bootstrap_admin_user` no longer exists (removed 2026-11-14; a config that sets it fails strict validation). `controller.auth` keeps `access_token_ttl`, `refresh_token_ttl`, `login_rate_per_minute`, `api_rate_per_minute`. | Implemented | `TestUserDataDirFromEnvironment`, `TestLoadBytesRejectsUnknownFieldsAndBadValues/removed_bootstrap_key`, `TestShippedConfigFilesAreValid` |
+
 ## Non-functional requirements
 
 | ID | Requirement | Status |
@@ -32,6 +34,7 @@
 
 ## Known gaps
 
-- CLI flag handling (`cmd/homecore`) has no automated test.
+- Flag handling of the server command (`cmd/homecore` without a subcommand) has no automated test; the `user` subcommands do (REQ-AUTH-015).
+- The `mobile` bindings expose no way to create accounts (no CLI on Android); to be designed with Phase 5. `mobile` still compiles for android/arm64.
 - The gomobile AAR has never been built; `make android-aar` needs gomobile and the Android NDK.
 - Not measured yet: idle CPU/RAM (goal G-3) and long-running stability (goal G-2).

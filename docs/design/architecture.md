@@ -133,7 +133,8 @@ internal/
     gen/                 oapi-codegen output (do not edit)
     middleware/
     handlers/
-  auth/                  users, password hashing, JWT, refresh tokens (no roles, ADR-011)
+  auth/                  users, argon2id passwords, HS256 JWT, rotating refresh tokens, `homecore user` backend (no roles, ADR-011)
+  audit/                 audit_log writer (auth now, shutdown in Phase 3)
   devices/               device model, validation, repository
   monitoring/            TCP probe, hysteresis, scheduler job, status history
   wol/                   magic packet build/send, MAC parsing, broadcast resolution
@@ -146,7 +147,7 @@ internal/
   storage/               SQLite open/pragmas, migrations (embedded), tx helpers
     migrations/          versioned *.sql files
   scheduler/             tiny interval runner with jitter
-  platform/              OS adapters: power control, metrics (build-tagged)
+  platform/              OS adapters: power control, metrics, terminal no-echo input (`tty`) (build-tagged)
 web/                     embedded UI (static/ = build of the frontend submodule, placeholder/ = fallback) + offline Swagger UI assets
 frontend/                git submodule (HomeCoreUI source; built by `make ui-build`, see ADR-009)
 configs/                 example configuration
@@ -362,11 +363,90 @@ Principles:
 3. Separate keys: JWT signing key ≠ Controller signing key ≠ master key.
 4. No plaintext secrets in the DB; no secrets in API responses or logs.
 5. Shutdown writes `audit_log` (with the acting user). Wake/shutdown are throttled per device (ADR-012).
-6. Accounts are created and re-passworded with the `homecore user add|passwd` command (Phase 1b);
-   there is no default account and no password in the log. Android: the host app calls the same
-   code through `mobile` (to be designed with Phase 5).
-7. Login is rate-limited per IP; generic error messages; constant-time password verification.
+6. Accounts are created and re-passworded with the `homecore user add|passwd|list` command (§10.1);
+   there is no default account and no password in the log. Android: the host app will call the same
+   code through `mobile` (to be designed with Phase 5; not exposed yet).
+7. Login is rate-limited per IP; generic error messages; argon2id with constant-time comparison; an
+   unknown user costs the same as a wrong password (dummy hash).
 8. Agent runs unprivileged; power actions via polkit (Linux) / `SeShutdownPrivilege` (Windows).
+
+### 10.1 Authentication design
+
+Code: `internal/auth`, `internal/audit`, `internal/api/handlers/handlers_auth.go`,
+`cmd/homecore/user.go`. Requirements: [authentication.md](../requirements/authentication.md).
+Decisions: [ADR-011](decisions.md#adr-011--no-roles-every-authenticated-user-is-equal),
+[ADR-013](decisions.md#adr-013--authentication-implementation-argon2id-stdlib-hs256-jwt-refresh-grace-window).
+
+```
+ homecore user add|passwd|list ──▶ auth.Accounts ──▶ users, audit_log     (direct on the DB file)
+
+ POST /auth/login ───▶ auth.Service.Login ──▶ users (argon2id verify) ──▶ refresh_tokens (new family)
+ any protected call ─▶ middleware.Authorize ─▶ auth.JWT.Authenticate ─▶ users (exists, not disabled)
+ POST /auth/refresh ─▶ auth.Service.Refresh ─▶ one transaction: rotate / grace / revoke family
+ POST /auth/logout ──▶ auth.Service.Logout ──▶ revoke the family
+```
+
+**Passwords.** argon2id, `m=32 MiB, t=3, p=1`, 16-byte salt, 32-byte key, PHC string with the
+parameters in it. A stored hash is verified with *its own* parameters and re-hashed with the
+current ones after a successful login, so raising `auth.DefaultParams` needs no migration. At most
+2 hashes run concurrently (memory). Passwords: 12–256 characters when set, ≤ 256 when presented.
+
+**Signing key.** 32 random bytes, generated at first start inside a transaction, sealed with the
+master key (AAD `system_settings.auth.jwt_signing_key`) and stored in `system_settings`. It is
+unrelated to the master key and to the Controller Ed25519 key (Phase 3). Rotation = delete the row
+(signs everybody out; refresh tokens keep working).
+
+**Access token.** HS256 JWT, `sub`/`username`/`iat`/`exp`/`jti`, lifetime `access_token_ttl`.
+Verification: header must be exactly `alg=HS256` (`typ` JWT or absent, no other members) before the
+signature is looked at, constant-time MAC check, then claims. Clock handling: issuer and verifier
+are the same host, so there is no skew between parties; `exp` is strict, `iat` may be up to 1 minute
+in the future (backwards NTP steps). Every request also reads the user row, so disabling or
+deleting an account takes effect immediately; the cost is one indexed SQLite read per request.
+
+**Refresh token.** 32 random bytes (base64url), only SHA-256 stored, one *family* per login.
+`POST /auth/refresh` runs in one `BEGIN IMMEDIATE` transaction, so concurrent requests with the
+same token are serialised:
+
+| State of the presented token | Result |
+|------------------------------|--------|
+| unknown, expired, revoked | `401` |
+| user disabled or deleted | `401`, family revoked |
+| unused | mark used, issue new access + refresh token in the same family (`expires_at = now + refresh_token_ttl`, sliding), keep a sealed copy of the pair on the used row |
+| used, `now - used_at < 10 s` and the sealed copy exists | **grace window:** return the same pair (access token not re-minted, `expires_in` = remaining) |
+| used, window passed | **reuse:** revoke the whole family, `401`, audit `auth.refresh_reuse` |
+
+The grace window exists because browser tabs on plain HTTP cannot serialise refreshes (no Web Locks
+outside secure contexts, GAP-INF-01): two tabs sending the same token within a moment would
+otherwise log the user out. The successor pair is retrievable only because a sealed copy
+(`refresh_tokens.successor_sealed`, AES-GCM, AAD `refresh_tokens.successor`) sits on the used row;
+it is set to `NULL` on the next rotation of the family and by the maintenance job within a minute
+after the window, and always when the family is revoked. Residual risk: a thief who replays a just
+rotated token within 10 s receives the same pair as the legitimate client; reuse after that is
+detected as before. The window is `auth.DefaultRefreshGrace` (not a config key).
+
+**Logout** revokes the family of the presented refresh token if it belongs to the caller
+(idempotent `204`). **Password change** (`user passwd`) revokes all refresh tokens of the user in
+the same transaction. Access tokens are stateless and stay valid until `exp` in both cases (≤ 15 min).
+
+**Login hygiene.** Unknown user, disabled user and wrong password all run one argon2 verification
+(a dummy hash for unknown users) and return the identical `401`. The reason goes only to
+`audit_log.details`. The per-IP limit on `POST /auth/*` (10/min, burst 5) is applied before the handler.
+
+**Audit.** `internal/audit.Writer` (`Write`, `WriteTx`) appends to `audit_log`. Actions written
+today: `auth.login` (ok/failed), `auth.logout`, `auth.refresh_reuse`, `user.create`,
+`user.password_change` (actor `cli`). A failed login stores the username only when it matches an
+existing account; unknown names are dropped because users do mistype passwords into that field.
+Details never carry passwords, tokens or keys. Login-path writes are best effort (error logged);
+Phase 3 shutdown will use the returned error to refuse the action if the record cannot be written.
+
+**Maintenance.** `auth.Service.Run(ctx)` (an errgroup member of the Controller) wipes expired
+sealed copies and deletes refresh rows that expired or were revoked > 24 h ago or rotated > 7 days ago.
+
+**First account.** No bootstrap: the Controller starts without users and logs one warning naming
+`homecore user add <username>`. The command opens `<data_dir>/homecore.db` itself (the Controller
+may be running; SQLite WAL + 5 s busy timeout), migrates it if needed, and takes the password from
+`HOMECORE_PASSWORD`, else stdin when not a terminal, else a no-echo prompt asked twice
+(`internal/platform/tty`, `golang.org/x/sys` only). It never prints or logs the password.
 
 ---
 
@@ -405,7 +485,7 @@ use `//go:build linux && !android`.
 - Unit tests per package (protocol signing/verification, replay cache, MAC parsing, magic packet,
   state machine, hysteresis, config validation).
 - Storage tests against a temp-file SQLite DB (real driver, no mocks).
-- API tests with `httptest` against the real router + temp DB.
+- API tests with `httptest` against the real router + temp DB; authentication tests use the real `auth.Service` (JWT, refresh tokens, audit) and a fake clock for expiry and the grace window.
 - Integration test: Controller and Agent in `both` mode with a fake `PowerController`.
 - Cross-compile check in CI for all targets (`make cross`).
 - Resource benchmark (Phase 6): idle RSS target < 30 MB, idle CPU ≈ 0 %.

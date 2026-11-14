@@ -11,6 +11,8 @@ import (
 
 	"github.com/thanhtunguet/homecore/internal/agent"
 	"github.com/thanhtunguet/homecore/internal/api"
+	"github.com/thanhtunguet/homecore/internal/audit"
+	"github.com/thanhtunguet/homecore/internal/auth"
 	"github.com/thanhtunguet/homecore/internal/config"
 	"github.com/thanhtunguet/homecore/internal/secrets"
 	"github.com/thanhtunguet/homecore/internal/storage"
@@ -63,7 +65,24 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 	if err != nil {
 		return err
 	}
-	_ = sealer // TODO(phase-1/3/4): inject into auth (JWT key), controller keys and ddns tokens.
+	// TODO(phase-3/4): inject the sealer into controller key management and DDNS tokens too.
+
+	authSvc, err := auth.NewService(ctx, auth.Config{
+		DB:         db,
+		Sealer:     sealer,
+		Audit:      audit.NewWriter(db, nil),
+		Log:        log,
+		AccessTTL:  cfg.Controller.Auth.AccessTokenTTL,
+		RefreshTTL: cfg.Controller.Auth.RefreshTokenTTL,
+	})
+	if err != nil {
+		return err
+	}
+	if n, err := authSvc.Accounts().Store().CountUsers(ctx); err != nil {
+		return fmt.Errorf("count users: %w", err)
+	} else if n == 0 {
+		log.Warn("no user accounts exist, nobody can sign in: run `homecore user add <username>` (add --config/--data-dir as for the server)")
+	}
 
 	srv, err := api.New(api.Deps{
 		Config:          cfg.Controller,
@@ -71,7 +90,7 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 		ShutdownTimeout: cfg.ShutdownTimeout,
 		Log:             log,
 		DB:              db,
-		// Authn: auth.NewJWT(...)  TODO(phase-1): until then every protected endpoint returns 401.
+		Auth:            authSvc,
 	})
 	if err != nil {
 		return err
@@ -79,6 +98,7 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return srv.Run(gctx) })
+	g.Go(func() error { return authSvc.Run(gctx) }) // refresh-token housekeeping
 	// TODO(phase-2): g.Go(monitor.Run), g.Go(commandDispatcher.Run), retention job.
 	// TODO(phase-4): g.Go(ddnsSyncer.Run).
 	return g.Wait()

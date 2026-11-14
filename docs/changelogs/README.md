@@ -5,6 +5,7 @@ that spans days uses its end date). Newest entries are listed first below.
 
 | Date | Entry | Summary |
 |------|-------|---------|
+| 2026-11-14 | [2026-11-14-phase-1b-authentication.md](2026-11-14-phase-1b-authentication.md) | Phase 1b: argon2id, HS256 JWT, refresh rotation with reuse detection and grace window, `internal/audit`, `homecore user add\|passwd\|list`, bootstrap key removed (ADR-013) |
 | 2026-11-14 | [2026-11-14-no-roles-throttle-ddns-lookup.md](2026-11-14-no-roles-throttle-ddns-lookup.md) | No roles (ADR-011), idempotent commands + 1 s per-device throttle (ADR-012), Cloudflare lookups, generated UI types and tests |
 | 2026-11-12 | [2026-11-12-api-gap-quick-wins.md](2026-11-12-api-gap-quick-wins.md) | Additive API gaps closed: `501` envelope, cache headers, device type/OS, `/system/info`, viewer gating |
 | 2026-11-12 | [2026-11-12-frontend-api-integration.md](2026-11-12-frontend-api-integration.md) | Frontend submodule wired to the REST API, embedded build, `REQ-UI`, gap report |

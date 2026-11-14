@@ -77,7 +77,6 @@ type Auth struct {
 	RefreshTokenTTL    time.Duration `yaml:"refresh_token_ttl"`
 	LoginRatePerMinute int           `yaml:"login_rate_per_minute"`
 	APIRatePerMinute   int           `yaml:"api_rate_per_minute"`
-	BootstrapAdminUser string        `yaml:"bootstrap_admin_user"`
 }
 
 // Monitor configures the TCP online monitor.
@@ -129,7 +128,6 @@ func Default() Config {
 				RefreshTokenTTL:    30 * 24 * time.Hour,
 				LoginRatePerMinute: 10,
 				APIRatePerMinute:   600,
-				BootstrapAdminUser: "admin",
 			},
 			Monitor: Monitor{
 				Tick:             5 * time.Second,
