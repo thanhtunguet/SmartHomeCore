@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | Brief §7 (phases), §8 (MVP); [architecture](../design/architecture.md) |
-| Last updated | 2026-11-14 (Phase 3 Controller side done; systemd/polkit host validation open) |
+| Last updated | 2026-11-14 (Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
 
 Legend: `[x]` done and verified · `[~]` partially done · `[ ]` not started.
 Tick items in the same change that completes them, and add a changelog entry.
@@ -17,7 +17,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 | 1b | JWT authentication (MVP; the brief places it under §3.1) | **Done** |
 | 2 | Device management | **Done** |
 | 3 | Secure Agent | **Done** except host validation (systemd + polkit on a real Debian/Ubuntu host, open) |
-| 4 | DDNS and system monitoring | Interfaces only |
+| 4 | DDNS and system monitoring | **Done** except a run against the real Cloudflare and the real IP providers (open); metrics exercised on macOS only |
 | 5 | Android integration | Binding surface only |
 | 6 | Hardening | Not started |
 
@@ -25,8 +25,8 @@ Tick items in the same change that completes them, and add a changelog entry.
 
 1. **Phase 3 leftover — validate systemd + polkit on a real Debian/Ubuntu host** (a real power-off has never been exercised).
 2. **Phase 0 — on-device Android spike**: slipped past Phase 3; do it before Phase 4 ends.
-3. **Phase 4 — DDNS** (the retention job already prunes `ddns_sync_history`).
-4. Re-run the UI against the real Controller (Phase 2 and 3 backends exist now, GAP-BE-01); regenerate the frontend types for the Phase 3 spec edits (`GET /activity`).
+3. **Phase 4 leftover — one live DDNS run**: a Cloudflare token on a scratch zone and the default IP providers, to see the real API and rate-limit behaviour (everything so far ran against fakes); and the metrics on a Linux host.
+4. Re-run the UI against the real Controller (Phase 2, 3 and 4 backends exist now, GAP-BE-01); regenerate the frontend types for the Phase 3 spec edits (`GET /activity`).
 
 ## Phase 0 — Android compatibility spike
 
@@ -103,13 +103,16 @@ Tick items in the same change that completes them, and add a changelog entry.
 
 ## Phase 4 — DDNS and system monitoring
 
-- [ ] Public-IP discovery with ≥ 2 providers and quorum
-- [ ] Cloudflare client (`net/http`, no SDK); get/update record
-- [ ] Syncer job with exponential backoff; `ddns_sync_history`
-- [ ] DDNS handlers (CRUD + manual sync); token sealed, never returned
-- [ ] Cloudflare lookups for the form dropdowns: `POST /ddns/cloudflare/zones` and `.../zones/{zone_id}/records` (token from the body or from `config_id`; `502 cloudflare_error`); `record_id` is required and stored in `cf_record_id`; no lookup by name; `PATCH` changing `zone_id` without `record_id` → `400` (REQ-API-020, GAP-API-02)
-- [ ] gopsutil metrics provider; `GET /api/v1/system/metrics`, filling the optional fields (`cpu_cores`, `load_average`, `kernel`, `restricted`, `process.pid/uptime_seconds`)
-- [ ] DDNS state fields `detected_ip`, `dns_value`, `last_checked_at` filled by the syncer
+- [x] Public-IP discovery with ≥ 2 providers and quorum (REQ-DDNS-001, ADR-016)
+- [x] Cloudflare client (`net/http`, no SDK); get/update record (REQ-DDNS-002)
+- [x] Syncer job with exponential backoff; `ddns_sync_history` (REQ-DDNS-006/007)
+- [x] DDNS handlers (CRUD + manual sync); token sealed, never returned (REQ-DDNS-003..005, REQ-SEC-003)
+- [x] Cloudflare lookups for the form dropdowns: `POST /ddns/cloudflare/zones` and `.../zones/{zone_id}/records` (token from the body or from `config_id`; `502 cloudflare_error`); `record_id` is required and stored in `cf_record_id`; no lookup by name; `PATCH` changing `zone_id` without `record_id` → `400` (REQ-API-020, GAP-API-02)
+- [x] gopsutil metrics provider; `GET /api/v1/system/metrics`, filling the optional fields (`cpu_cores`, `load_average`, `kernel`, `restricted`, `process.pid/uptime_seconds`) (REQ-SYS-001..004, GAP-API-07)
+- [x] DDNS state fields `detected_ip`, `dns_value`, `last_checked_at` filled by the syncer (migration `0006`, GAP-API-03)
+- [x] DDNS audit actions in the activity feed (REQ-DDNS-008)
+- [ ] Run once against the real Cloudflare API and the real public-IP providers
+- [ ] Run the metrics on a Linux host (only macOS was run; Linux is covered by `make cross`)
 
 ## Phase 5 — Android integration
 
@@ -134,7 +137,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 | Make the audit write for `device.shutdown` blocking (refuse the action when it cannot be recorded), if the owner wants that stricter rule | ADR-015, REQ-SHD-009 |
 | Controller key rotation (insert a new key, retire the old, let agents trust both) | REQ-SHD known gaps |
 | Health-job interval as a config key; pin or accept self-signed agent certificates for `https` bindings | REQ-SHD known gaps |
-| Activity feed from sources other than `audit_log` (monitor transitions, DDNS) once the UI needs them | ADR-015 |
+| Activity feed from sources other than `audit_log` (monitor transitions) once the UI needs them; DDNS changes and record updates are already audited | ADR-015 |
 | Cap the agent's accepted-`command_id` map (the protocol spec says caches are bounded) | REQ-AG-008 gap |
 | Signed agent acknowledgements (protocol v2) | agent-protocol §7 |
 | Signed agent announce for automatic IP updates | ADR-002 |
@@ -150,4 +153,6 @@ Tick items in the same change that completes them, and add a changelog entry.
 | Release pipeline must run `make ui-build` before `make cross` | GAP-INF-10 |
 | Persist the monitor's consecutive-failure counters across restarts (today only the status survives) | REQ-MON-004 known gap |
 | Shorten the deadline sweep (5 s) or complete deadline exactly via a timer, if second-level accuracy of `timed_out` ever matters | REQ-CMD-006 |
-| Test the `ddns_sync_history` prune SQL once Phase 4 fills the table | REQ-RET-001 |
+| Endpoint for `ddns_sync_history` (the UI sees only the `last_*` fields and the activity feed) | REQ-DDNS known gaps |
+| Sub-tick backoff (the syncer ticks every 5 s, so a 1 s retry waits for the next tick); make the tick a config key if it matters | REQ-DDNS known gaps |
+| Windows metrics (gopsutil compiles for it, untested; load average is restricted there) | REQ-SYS-001 |

@@ -3,10 +3,10 @@
 | | |
 |---|---|
 | Engine | SQLite 3 (embedded) via `modernc.org/sqlite` (pure Go, [ADR-004](decisions.md#adr-004--sqlite-driver-moderncorgsqlite-everywhere)) |
-| Schema version | `5` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`, `0003_users_no_roles.sql`, `0004_refresh_grace.sql`, `0005_agent_status.sql`) |
+| Schema version | `6` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`, `0003_users_no_roles.sql`, `0004_refresh_grace.sql`, `0005_agent_status.sql`, `0006_ddns_state.sql`) |
 | Owner role | Controller only. The Agent has no database |
 | Requirements | [storage-and-secrets.md](../requirements/storage-and-secrets.md) |
-| Last reviewed | 2026-11-14 (Phase 3: migration 0005, agent status columns, controller key writer, audit actions) |
+| Last reviewed | 2026-11-14 (Phase 4: migration 0006, DDNS observed state and record uniqueness; earlier: Phase 3 migration 0005) |
 
 The DDL in `internal/storage/migrations/` is authoritative. This document explains it and must be
 updated in the same change as any new migration.
@@ -245,15 +245,22 @@ One managed Cloudflare DNS record per row.
 | `enabled` | INTEGER | no | `1` | bool |
 | `api_token_sealed` | BLOB | no | | sealed, AAD `ddns_configs.api_token`; never returned |
 | `cf_record_id` | TEXT | no | `''` | Cloudflare record id, always the one chosen in the form's record dropdown (`record_id` is required by the API; `''` only for rows that predate it) |
-| `last_ip` | TEXT | no | `''` | last value written/confirmed |
+| `last_ip` | TEXT | no | `''` | last value written/confirmed at Cloudflare |
 | `last_synced_at` | INTEGER | yes | | last success |
-| `last_error` | TEXT | no | `''` | |
+| `last_error` | TEXT | no | `''` | text of the last failed attempt; contains no token or provider URL |
 | `last_error_at` | INTEGER | yes | | |
+| `detected_ip` | TEXT | no | `''` | migration `0006`: public address of the last successful discovery |
+| `dns_value` | TEXT | no | `''` | migration `0006`: content of the Cloudflare record as last read |
+| `last_checked_at` | INTEGER | yes | | migration `0006`: last attempt that reached a verdict, changed or not |
 | `created_at`, `updated_at` | INTEGER | no | | |
 
-Constraint: `UNIQUE (zone_id, record_name, record_type)`.
+Constraints: `UNIQUE (zone_id, record_name, record_type)`; since `0006` also the partial unique index `ddns_configs_record (zone_id, cf_record_id) WHERE cf_record_id <> ''`, so two configurations can never fight over one Cloudflare record (the repository maps both violations to `ddns.ErrDuplicate`, HTTP `400`).
+
+Writers: `ddns.Service` (create/update/delete, sealed token) and the sync path (`SaveOutcome`, a conditional update on `updated_at` so a sync that raced with an edit is dropped and writes no history). A change of `zone_id`, `cf_record_id`, `record_name` or `record_type` clears `last_ip`, `detected_ip`, `dns_value`, `last_synced_at`, `last_checked_at` and the error fields. [ADR-016](decisions.md#adr-016--phase-4-decisions-public-ip-quorum-record-ids-ddns-state-and-metrics).
 
 ### ddns_sync_history
+
+One row per sync attempt that reached a verdict (`updated`, `unchanged`, `failed`), written in the same transaction as the configuration's state.
 
 | Column | Type | Null | Constraint / note |
 |--------|------|------|-------------------|

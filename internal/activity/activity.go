@@ -185,6 +185,10 @@ type details struct {
 	Status    string `json:"status"`
 	ErrorCode string `json:"error_code"`
 	KeyID     string `json:"key_id"`
+	// DDNS entries: the record, the public address and what a sync did (never the token or an error text).
+	RecordName string `json:"record_name"`
+	IP         string `json:"ip"`
+	SyncResult string `json:"sync_result"`
 }
 
 func toItem(r Raw) Item {
@@ -238,10 +242,44 @@ func message(r Raw, d details) string {
 		return commandMessage("Wake", device, d, failed)
 	case "device.shutdown":
 		return commandMessage("Shutdown", device, d, failed)
+	case "ddns.create":
+		return "DDNS configuration " + ddnsLabel(d) + " created"
+	case "ddns.update":
+		return "DDNS configuration " + ddnsLabel(d) + " updated"
+	case "ddns.delete":
+		return "DDNS configuration " + ddnsLabel(d) + " deleted"
+	case "ddns.sync":
+		return ddnsSyncMessage(d, failed)
 	case "controller_key.create":
 		return "Controller signing key created" + suffix(" (key_id ", d.KeyID, ")")
 	}
 	return r.Action
+}
+
+// ddnsLabel names a DDNS configuration by its name and, when different, the record it manages.
+func ddnsLabel(d details) string {
+	switch {
+	case d.Name != "" && d.RecordName != "" && d.Name != d.RecordName:
+		return d.Name + " (" + d.RecordName + ")"
+	case d.Name != "":
+		return d.Name
+	case d.RecordName != "":
+		return d.RecordName
+	}
+	return "a record"
+}
+
+func ddnsSyncMessage(d details, failed bool) string {
+	rec := firstNonEmpty(d.RecordName, d.Name, "a DDNS record")
+	switch {
+	case failed:
+		return "DDNS sync of " + rec + " failed"
+	case d.SyncResult == "updated":
+		return rec + " updated" + suffix(" to ", d.IP, "")
+	case d.SyncResult == "unchanged":
+		return rec + " checked: already up to date" + suffix(" (", d.IP, ")")
+	}
+	return "DDNS sync of " + rec
 }
 
 func commandMessage(kind, device string, d details, failed bool) string {

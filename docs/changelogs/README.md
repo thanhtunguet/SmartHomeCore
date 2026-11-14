@@ -5,6 +5,7 @@ that spans days uses its end date). Newest entries are listed first below.
 
 | Date | Entry | Summary |
 |------|-------|---------|
+| 2026-11-14 | [2026-11-14-phase-4-ddns-metrics.md](2026-11-14-phase-4-ddns-metrics.md) | Phase 4: public-IP quorum, Cloudflare client, DDNS configs and syncer with backoff, Cloudflare lookups, gopsutil system metrics, migration `0006` (ADR-016) |
 | 2026-11-14 | [2026-11-14-phase-3-shutdown.md](2026-11-14-phase-3-shutdown.md) | Phase 3 Controller side: sealed Controller key, signed shutdown dispatcher, agent status + health job, `GET /activity`, `homecore key show` (ADR-015) |
 | 2026-11-14 | [2026-11-14-phase-2-devices.md](2026-11-14-phase-2-devices.md) | Phase 2: device registry and API, monitor with hysteresis, type-generic command engine and wake, command history, retention, spec conformance tests (ADR-014) |
 | 2026-11-14 | [2026-11-14-phase-1b-authentication.md](2026-11-14-phase-1b-authentication.md) | Phase 1b: argon2id, HS256 JWT, refresh rotation with reuse detection and grace window, `internal/audit`, `homecore user add\|passwd\|list`, bootstrap key removed (ADR-013) |

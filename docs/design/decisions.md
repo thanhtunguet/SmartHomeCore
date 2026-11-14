@@ -344,3 +344,65 @@ what is audited: probes and monitor transitions are not in it. Changing the inte
 configurable is a code change, not a config key, until a need appears. No new dependency, no wire
 change, protocol stays v1.
 
+
+---
+
+## ADR-016 — Phase 4 decisions: public-IP quorum, record ids, DDNS state and metrics
+
+**Context.** Phase 4 made the Controller change DNS records on its own and report on its host. A
+wrong public address written to DNS breaks remote access, and a sync that updates the wrong record
+can break something unrelated, so the rules below favour doing nothing over guessing. gopsutil was
+approved as the one new module for metrics (`golang.org/x/crypto` came with Phase 1b).
+
+**Decision.**
+- **Quorum, not majority.** The public IP is accepted only if **at least 2 providers return the same
+  address and no other address has as many answers** (`ddns.decide`). Two providers must exist, on
+  different hosts, over `https` (config check). The answer must be a bare address of the requested
+  family and **public**: loopback, private, link-local, CGNAT, documentation, multicast, 6to4, NAT64,
+  Teredo and similar ranges are refused (a Controller behind a proxy or captive portal must not
+  publish `10.x`). Sockets are pinned to the family (`tcp4`/`tcp6`), so an `A` record never learns an
+  IPv6 address. Redirects are followed only to the same host (an open redirect cannot move the
+  question to an unlisted third party), no proxy is used (it would answer with the proxy's address),
+  bodies are 128 bytes at most. One success is shared and cached 10 s per family. Provider URLs can
+  carry keys, so only the host appears in errors and logs. Rejected: first-answer-wins, strict
+  majority of all providers (one provider being down must not stop DDNS), and a single provider with
+  a fallback.
+- **A configuration points at a record id, never at a name.** `record_id` is required on create;
+  `PATCH` that changes the zone, name or type must carry a `record_id` too (`400` otherwise); the
+  sync reads the record by id and **refuses to write** if its type or name differ from the
+  configuration. A partial unique index on `(zone_id, cf_record_id)` stops two configurations from
+  managing one record. The spec has no `409` for DDNS, so duplicates and a record that does not match
+  are `400 bad_request` with a specific message. Create and a token or target change verify the record
+  with Cloudflare (read-only call) so a typo fails at the form, not at 3 am.
+- **Observed state is stored separately from pushed state.** Migration `0006` adds `detected_ip`
+  (what discovery saw), `dns_value` (what Cloudflare held) and `last_checked_at`, next to `last_ip`
+  (what the Controller last wrote or confirmed), so the UI can show drift and "checked but unchanged".
+  A sync result is saved only if the configuration was not edited meanwhile (compare-and-set on
+  `updated_at`); history is written in the same transaction.
+- **One sync path.** The scheduler and the manual endpoint call `Service.Sync`, serialised per
+  configuration. A failed sync is a value (`DdnsSyncResult.result = failed`), not an HTTP error: the
+  request itself succeeded. Lookups are the exception and are `502 cloudflare_error` because there the
+  call to Cloudflare *is* the request.
+- **Failures are classified.** Transient (network, `429`, `5xx`, quorum failure) back off 1 s → 5 min,
+  jittered, capped at the interval, `Retry-After` honoured. Permanent (bad token, record mismatch)
+  wait for the next interval instead of hammering Cloudflare. Each configuration has its own
+  schedule; a slow or failing one cannot delay another (own goroutine, 4 at once). The schedule is
+  in memory: after a restart every enabled configuration is due at once (cheap, and a restart is when
+  an address may have changed).
+- **Audit is not a log of polling.** Scheduled syncs are audited only when they changed the record;
+  manual syncs always. Everything else is a log line.
+- **No Cloudflare SDK.** Four endpoints over `net/http` with a typed error (status, Cloudflare code,
+  scrubbed message, `Retry-After`) are smaller than a dependency and keep the token handling visible.
+- **Metrics: gopsutil on top of the runtime provider.** `system.Gopsutil` extends
+  `system.RuntimeProvider`; anything it cannot read is named in `restricted` (always present in the
+  response) instead of being reported as `0`. CPU % is a delta between samples and absent until two
+  exist. `system.Cached` (3 s) bounds the cost of polling. gopsutil v4 is pure Go and keeps
+  `CGO_ENABLED=0` and `make cross` green (checked for the seven targets).
+
+**Consequences.** DDNS can fail to update while a provider is down and another disagrees: that is
+the intended price of never trusting one source. The providers learn the Controller's public IP (to be
+stated in the example config). A bad answer from Cloudflare cannot make the Controller write to a
+record it did not choose. The first metrics call can take up to ~750 ms. A new dependency
+(`github.com/shirou/gopsutil/v4`, plus its small transitive set) was approved with the Phase 4 brief.
+Not decided: rotation of provider lists at runtime (needs a restart), multi-record configurations and
+wildcard records.

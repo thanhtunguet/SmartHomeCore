@@ -15,9 +15,11 @@ import (
 	"github.com/thanhtunguet/homecore/internal/commands"
 	"github.com/thanhtunguet/homecore/internal/config"
 	"github.com/thanhtunguet/homecore/internal/controllerkey"
+	"github.com/thanhtunguet/homecore/internal/ddns"
 	"github.com/thanhtunguet/homecore/internal/devices"
 	"github.com/thanhtunguet/homecore/internal/httpx"
 	"github.com/thanhtunguet/homecore/internal/monitoring"
+	"github.com/thanhtunguet/homecore/internal/platform"
 	"github.com/thanhtunguet/homecore/internal/storage"
 	"github.com/thanhtunguet/homecore/internal/version"
 )
@@ -41,6 +43,10 @@ type Handlers struct {
 	// Phase 3.
 	ControllerKey *controllerkey.Key // GET /system/controller-key (nil: 501)
 	Activity      *activity.Service  // GET /activity (nil: 501)
+
+	// Phase 4.
+	DDNS    *ddns.Service            // DDNS configurations, Cloudflare lookups, manual sync (nil: 501)
+	Metrics platform.MetricsProvider // GET /system/metrics (nil: 501)
 }
 
 var _ gen.ServerInterface = (*Handlers)(nil)

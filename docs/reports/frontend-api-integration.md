@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| Date | 2026-11-12 (first pass); resolution logs in §9 (second pass, same day), §10 (third pass, 2026-11-14, after the owner's decisions), §11 (Phase 1b, authentication) and §12 (Phase 2, devices and commands) and §13 (Phase 3, shutdown, agent status, activity) |
+| Date | 2026-11-12 (first pass); resolution logs in §9 (second pass, same day), §10 (third pass, 2026-11-14, after the owner's decisions), §11 (Phase 1b, authentication) and §12 (Phase 2, devices and commands) and §13 (Phase 3, shutdown, agent status, activity) and §14 (Phase 4, DDNS and system metrics) |
 | Scope | `frontend/` (git submodule, HomeCoreUI) wired to the Controller REST API (`api/openapi.yaml` 0.1.0) |
 | Related | [web-ui requirements](../requirements/web-ui.md), [ADR-009/010](../design/decisions.md), [changelog](../changelogs/2026-11-12-frontend-api-integration.md) |
-| Status | UI side wired and smoke-tested against a spec-conformant mock. Since Phase 2 the Controller implements auth, devices, probe, history, wake and commands (checked with `curl`, §12); **shutdown, controller key and the activity feed are implemented since Phase 3 (§13); metrics and DDNS still return 501**, and the UI itself has not been run in a browser against the real Controller. |
+| Status | UI side wired and smoke-tested against a spec-conformant mock. Since Phase 2 the Controller implements auth, devices, probe, history, wake and commands (checked with `curl`, §12); **shutdown, controller key and the activity feed are implemented since Phase 3 (§13); DDNS, the Cloudflare lookups and system metrics are implemented since Phase 4 (§14, DDNS checked against a fake Cloudflare, not the real service). No documented operation returns 501 any more**, and the UI itself has not been run in a browser against the real Controller. |
 
 ## 1. Summary
 
@@ -60,12 +60,12 @@ the Controller's behaviour.
 | ID | Sev | Gap | What the UI does now | Suggested change |
 |----|-----|-----|----------------------|------------------|
 | GAP-API-01 ✅ | Medium | `Device` has no **type** (desktop/NAS/TV…) or **OS**; the UI uses both for icons and labels | Stored per browser in `localStorage` keyed by device id (`api/deviceMeta.ts`): not shared between browsers/users, lost when browser data is cleared, defaults to desktop/linux | Add optional `device_type` and `os` (or a free-form `tags`/`metadata`) to `Device`, `DeviceCreate`, `DeviceUpdate`; add a migration |
-| GAP-API-02 ◐ | Medium | No way to **list Cloudflare zones/records** | Zone ID and record name are typed by hand; the old "pick zone, pick record" dropdowns are gone | `GET /ddns/zones` and `GET /ddns/zones/{id}/records` (token supplied once, or from an existing config), or accept zone *name* and resolve it server-side |
-| GAP-API-03 ◐ | Medium | No **detected public IP** and no **current DNS value**; `DdnsConfig` only has `last_ip` | Dashboard "Public IPv4" shows the last IP pushed; the "WAN IP changed, sync needed" comparison cannot be shown | Add `detected_ip`, `dns_value`, `last_checked_at` to `DdnsConfig` (or `GET /system/public-ip`) |
+| GAP-API-02 ✅ | Medium | No way to **list Cloudflare zones/records** | Zone ID and record name are typed by hand; the old "pick zone, pick record" dropdowns are gone | `GET /ddns/zones` and `GET /ddns/zones/{id}/records` (token supplied once, or from an existing config), or accept zone *name* and resolve it server-side |
+| GAP-API-03 ✅ | Medium | No **detected public IP** and no **current DNS value**; `DdnsConfig` only has `last_ip` | Dashboard "Public IPv4" shows the last IP pushed; the "WAN IP changed, sync needed" comparison cannot be shown | Add `detected_ip`, `dns_value`, `last_checked_at` to `DdnsConfig` (or `GET /system/public-ip`) |
 | GAP-API-04 ✅ | Medium | `PATCH /devices/{id}` cannot **unset** anything: no way to remove an agent binding, clear the MAC, broadcast or description | Disabling "remote shutdown" in the form keeps the old binding (the form says so); clearing fields sends `""`, which the server may reject | Define merge-patch semantics with `null` (e.g. `"agent": null`), or add `DELETE /devices/{id}/agent` |
 | GAP-API-05 | Medium | No **activity/audit endpoint** although the `audit_log` table exists (REQ-API-008 gap) | Activity = command history + events of this browser session; probes, device edits, DDNS actions and other users' actions are lost on reload | `GET /api/v1/activity` (cursor, filters by device/category), fed by `audit_log` and status history |
 | GAP-API-06 ✅ | Low | No **settings/info endpoint**: server name, listen address, monitoring defaults, session lifetime, retention live in YAML | UI Settings shows only what `/healthz` and `/system/metrics` give; defaults for new devices are browser-local | Read-only `GET /system/info` (version, mode, listen, defaults); decide whether any setting should become writable |
-| GAP-API-07 ◐ | Low | `SystemMetrics` is a subset of what the System screen was designed for: no CPU core count, kernel, per-interface MAC/Rx/Tx, PID, process uptime, load average, "restricted metrics" list for Android | Those tiles were removed; platform string is split into OS/arch | Extend `SystemMetrics` (Phase 4, `gopsutil`) or drop the tiles from the design |
+| GAP-API-07 ✅ | Low | `SystemMetrics` is a subset of what the System screen was designed for: no CPU core count, kernel, per-interface MAC/Rx/Tx, PID, process uptime, load average, "restricted metrics" list for Android | Those tiles were removed; platform string is split into OS/arch | Extend `SystemMetrics` (Phase 4, `gopsutil`) or drop the tiles from the design |
 | GAP-API-08 ✅ | Low | `Device` has no **last latency** or **consecutive failures** | Latency is shown only after a manual probe in the current session | Add `last_latency_ms` (and optionally `consecutive_failures`) to `Device` |
 | GAP-API-09 ◐ | Medium | No **agent health/version**; the UI used to show "Agent ready/unreachable" and a version | "Agent status" is inferred: bound + device online = ready, bound + offline = unreachable. It is a guess, labelled "Bound (host online)" | Add `agent.status`, `agent.version`, `agent.last_ok_at` to `AgentBinding` once the dispatcher exists |
 | GAP-API-10 ✅ | Medium | **Command semantics are not in the spec**: what `completed` means per type, when `acknowledged` occurs, default deadlines, and what `409` on wake/shutdown means (already active vs. no MAC vs. no agent vs. already online?) | UI relies on [architecture §8.2](../design/architecture.md#82-command-lifecycle) and prints the server's `message` for any error | Copy the §8.2 state table into the `Command` schema description; enumerate `409` causes per operation |
@@ -272,3 +272,27 @@ Observations for the UI (no UI change made; `frontend/` untouched):
 - `agent.status` lags by up to one minute after a machine boots or an agent is bound; `ready` does not prove the Controller's key is trusted by that agent.
 - The Controller's public key for the agents' `trusted_controllers` is at `GET /system/controller-key`; the UI can show it with a copy button.
 
+## 14. Resolution log: Phase 4, DDNS and system metrics (2026-11-14)
+
+Verified against the **real Controller** (built binary, temp data dir, loopback port, `curl`). The
+Cloudflare API and the two public-IP providers were **fakes** (a throwaway script outside the repo,
+modelled on the documented Cloudflare v4 envelope); **no real Cloudflare account and no real
+provider** was used, so the live service's behaviour (error codes, rate limits) is unobserved. The UI
+was **not** run in a browser. Details: [changelog](../changelogs/2026-11-14-phase-4-ddns-metrics.md),
+[ddns.md](../requirements/ddns.md).
+
+| ID | Status | What the real Controller did |
+|----|--------|------------------------------|
+| GAP-API-02 ✅ | Closed at the API level (fake Cloudflare) | `POST /ddns/cloudflare/zones` with `{"api_token":…}` returned `{"items":[{id,name}…]}` ordered by name; `.../zones/zone1/records` returned A/AAAA records ordered by name with `id`, `name`, `type`, `content`, `proxied`, `ttl`; a wrong token answered `502 cloudflare_error` ("Invalid access token (HTTP 403)"); neither or both of `api_token`/`config_id` `400`; an unknown `config_id` `404`. `POST /ddns` without `record_id` is `400`; with it `201`, `has_api_token: true`, no token in the body. `PATCH {"zone_id":…}` without `record_id` is `400`; with a `record_id` that does not match the configured name or type `400` naming both records; a `record_id` Cloudflare does not know `400`. A second configuration for the same record is `400` (no `409` in the spec) |
+| GAP-API-03 ✅ | Closed at the API level (fake Cloudflare) | After the first scheduled run (5 s tick) the list showed `detected_ip`, `dns_value`, `last_ip`, `last_checked_at` and `last_synced_at`, and the fake record held the detected address. A provider address change was pushed within one interval (the fake saw `PATCH {"content":"9.9.9.9","proxied":false,"ttl":300}`); with the two providers disagreeing `last_error` named both answers by host and `last_ip`/`dns_value` stayed; `POST /ddns/{id}/sync` answered `200` with `result` `failed`, then `updated`, then `unchanged` |
+| GAP-API-07 ✅ | Closed at the API level (macOS host) | `GET /system/metrics` returned `cpu_cores`, `cpu_percent`, `load_average`, `kernel`, `memory`, `disk` (of the data directory), `local_ips`, `process.pid`/`uptime_seconds`/`rss_bytes` and `restricted: []`. Memory total, disk free and core count matched `sysctl`/`df`; CPU % was the same order of magnitude as `top` (3.5 % against 15 %: different windows, coarse macOS counters). Not run on Linux |
+| GAP-BE-01 | Closed for the backend | Every documented operation is now implemented; the UI still has not been run against the real Controller |
+
+Observations for the UI (no UI change made; `frontend/` untouched):
+
+- A failed sync is `200` with `result: "failed"` and an `error` text, not an HTTP error; the HTTP error is `502 cloudflare_error` only for the two lookups. Read `result`.
+- `DdnsConfig` fields `detected_ip`, `dns_value`, `last_checked_at`, `last_error`, `last_error_at`, `last_ip`, `last_synced_at` are absent until the first run or the first failure; a changed zone, record, name or type clears them.
+- There is no `GET /ddns/{id}`: use the list. Lookups use `POST` so the token stays out of URLs; to edit an existing configuration pass `config_id` instead of re-sending the token.
+- The `PATCH` that changes the target must send `record_id` chosen from the record dropdown, and a rejected token or target is `400` with Cloudflare's reason as `message` (not a `409`).
+- `cpu_percent` is absent for the first moments after start and when the platform cannot provide it; use `restricted` to explain a missing figure. The API may take up to ~0.8 s on the very first call.
+- The generated TypeScript types need no new regeneration for Phase 4: `api/openapi.yaml` did not change.

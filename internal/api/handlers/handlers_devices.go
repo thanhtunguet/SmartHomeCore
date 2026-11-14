@@ -16,6 +16,7 @@ import (
 	"github.com/thanhtunguet/homecore/internal/audit"
 	"github.com/thanhtunguet/homecore/internal/auth"
 	"github.com/thanhtunguet/homecore/internal/commands"
+	"github.com/thanhtunguet/homecore/internal/ddns"
 	"github.com/thanhtunguet/homecore/internal/devices"
 	"github.com/thanhtunguet/homecore/internal/httpx"
 	"github.com/thanhtunguet/homecore/internal/page"
@@ -295,7 +296,7 @@ func agentInput(a *gen.AgentBinding) *devices.AgentInput {
 }
 
 // changedFields names the fields present in a PATCH body (never their values) for the audit log.
-func changedFields(u gen.DeviceUpdate) []string {
+func changedFields(u any) []string {
 	b, _ := json.Marshal(u)
 	var m map[string]json.RawMessage
 	_ = json.Unmarshal(b, &m)
@@ -313,11 +314,16 @@ func (h *Handlers) audit(r *http.Request, action, deviceID string, details map[s
 
 // auditResult writes an audit entry about a device with the acting user and client address.
 func (h *Handlers) auditResult(r *http.Request, action, deviceID, result string, details map[string]any) {
+	h.auditTarget(r, action, "device", deviceID, result, details)
+}
+
+// auditTarget writes an audit entry about any target with the acting user and client address.
+func (h *Handlers) auditTarget(r *http.Request, action, targetType, targetID, result string, details map[string]any) {
 	if h.Audit == nil {
 		return
 	}
 	e := audit.Entry{
-		Action: action, TargetType: "device", TargetID: deviceID, Result: result,
+		Action: action, TargetType: targetType, TargetID: targetID, Result: result,
 		RemoteAddr: middleware.ClientIP(r), Details: details,
 	}
 	if p, ok := auth.FromContext(r.Context()); ok {
@@ -331,7 +337,19 @@ func (h *Handlers) auditResult(r *http.Request, action, deviceID, result string,
 // apiError maps domain errors to the HTTP error envelope; anything else is a logged 500.
 func (h *Handlers) apiError(w http.ResponseWriter, r *http.Request, op string, err error) {
 	var verr *devices.ValidationError
+	var dverr *ddns.ValidationError
+	var cferr *ddns.CloudflareError
 	switch {
+	case errors.As(err, &cferr):
+		// Cloudflare refused or failed a lookup; its own reason is the message (never the token).
+		httpx.WriteError(w, http.StatusBadGateway, "cloudflare_error", cferr.Error())
+	case errors.As(err, &dverr):
+		httpx.WriteError(w, http.StatusBadRequest, "bad_request", dverr.Error())
+	case errors.Is(err, ddns.ErrDuplicate):
+		// The spec declares no 409 for DDNS, so a duplicate target is a 400.
+		httpx.WriteError(w, http.StatusBadRequest, "bad_request", err.Error())
+	case errors.Is(err, ddns.ErrNotFound):
+		httpx.WriteError(w, http.StatusNotFound, "not_found", "ddns configuration not found")
 	case errors.Is(err, devices.ErrNotFound):
 		httpx.WriteError(w, http.StatusNotFound, "not_found", "device not found")
 	case errors.Is(err, commands.ErrNotFound):

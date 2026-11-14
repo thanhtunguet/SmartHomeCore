@@ -47,6 +47,12 @@ func TestLoadBytesRejectsUnknownFieldsAndBadValues(t *testing.T) {
 		"zero wake deadline":     "controller:\n  commands:\n    wake_deadline: 0s\n",
 		"zero shutdown deadline": "controller:\n  commands:\n    shutdown_deadline: 0s\n",
 		"negative retention":     "controller:\n  retention_days: -1\n",
+		"one ddns provider":      "controller:\n  ddns:\n    ip_providers: [\"https://icanhazip.com\"]\n",
+		"http ddns provider":     "controller:\n  ddns:\n    ip_providers: [\"http://a.example/ip\", \"https://b.example/ip\"]\n",
+		"same-host providers":    "controller:\n  ddns:\n    ip_providers: [\"https://a.example/ip\", \"https://A.example/v4\"]\n",
+		"provider credentials":   "controller:\n  ddns:\n    ip_providers: [\"https://u:p@a.example/ip\", \"https://b.example/ip\"]\n",
+		"http cloudflare url":    "controller:\n  ddns:\n    cloudflare_api_url: http://127.0.0.1:9/client/v4\n",
+		"cloudflare url query":   "controller:\n  ddns:\n    cloudflare_api_url: \"https://api.example.com/v4?x=1\"\n",
 		"same listener":          "mode: both\ncontroller:\n  listen: \":8080\"\nagent:\n  listen: \":8080\"\n",
 	}
 	for name, yml := range cases {
@@ -82,5 +88,31 @@ func TestRetentionZeroKeepsEverything(t *testing.T) {
 	cfg, err := LoadBytes([]byte("controller:\n  retention_days: 0\n"), nil)
 	if err != nil || cfg.Controller.RetentionDays != 0 {
 		t.Fatalf("retention_days 0: %+v, %v", cfg.Controller.RetentionDays, err)
+	}
+}
+
+// REQ-DDNS-003, REQ-RT-013: the DDNS keys have safe defaults, a YAML list replaces them, and http is
+// accepted only with allow_insecure_http.
+func TestDDNSConfig(t *testing.T) {
+	cfg, err := LoadBytes(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := cfg.Controller.DDNS
+	if len(d.IPProviders) < 2 || d.CloudflareAPIURL != DefaultCloudflareAPIURL || d.AllowInsecureHTTP {
+		t.Fatalf("defaults: %+v", d)
+	}
+	cfg, err = LoadBytes([]byte("controller:\n  ddns:\n    ip_providers: [\"https://a.example/ip\", \"https://b.example/ip\"]\n"), nil)
+	if err != nil || len(cfg.Controller.DDNS.IPProviders) != 2 || cfg.Controller.DDNS.IPProviders[0] != "https://a.example/ip" {
+		t.Fatalf("a YAML list must replace the defaults: %+v, %v", cfg.Controller.DDNS.IPProviders, err)
+	}
+	dev := "controller:\n  ddns:\n    allow_insecure_http: true\n    cloudflare_api_url: http://127.0.0.1:9/client/v4\n" +
+		"    ip_providers: [\"http://127.0.0.1:1/ip\", \"http://127.0.0.2:1/ip\"]\n"
+	if _, err := LoadBytes([]byte(dev), nil); err != nil {
+		t.Fatalf("allow_insecure_http: %v", err)
+	}
+	// An agent-only process does not validate controller keys.
+	if _, err := LoadBytes([]byte("mode: agent\ncontroller:\n  ddns:\n    ip_providers: []\n"), nil); err != nil {
+		t.Fatalf("agent mode: %v", err)
 	}
 }

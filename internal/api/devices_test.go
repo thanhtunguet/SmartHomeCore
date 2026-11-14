@@ -27,10 +27,14 @@ import (
 	"github.com/thanhtunguet/homecore/internal/commands"
 	"github.com/thanhtunguet/homecore/internal/config"
 	"github.com/thanhtunguet/homecore/internal/controllerkey"
+	"github.com/thanhtunguet/homecore/internal/ddns"
+	"github.com/thanhtunguet/homecore/internal/ddns/ddnstest"
 	"github.com/thanhtunguet/homecore/internal/devices"
 	"github.com/thanhtunguet/homecore/internal/monitoring"
+	"github.com/thanhtunguet/homecore/internal/platform"
 	"github.com/thanhtunguet/homecore/internal/secrets"
 	"github.com/thanhtunguet/homecore/internal/storage"
+	"github.com/thanhtunguet/homecore/internal/system"
 )
 
 // devEnv is the real Controller router (real JWT authentication, real SQLite, the real device
@@ -48,6 +52,13 @@ type devEnv struct {
 	repo   *devices.SQLiteRepository
 	token  string
 	userID string
+
+	// Phase 4: DDNS against a fake Cloudflare and a scripted public-IP discoverer, and metrics.
+	cf      *ddnstest.Cloudflare
+	ip      *scriptedIP
+	ddnsSvc *ddns.Service
+	metrics *swapMetrics
+	logs    *logBuffer
 
 	mu      sync.Mutex
 	up      map[int]bool // monitor_port → reachable
@@ -101,7 +112,8 @@ func newDevEnvOpts(t *testing.T, mutate func(*config.Controller), realProbe bool
 	if err != nil {
 		t.Fatal(err)
 	}
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logs := &logBuffer{}
+	log := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	cfg := config.Default().Controller
 	cfg.Auth.APIRatePerMinute = 0 // the per-IP limiter is covered elsewhere
 	if mutate != nil {
@@ -125,7 +137,24 @@ func newDevEnvOpts(t *testing.T, mutate func(*config.Controller), realProbe bool
 		t.Fatal(err)
 	}
 
-	e := &devEnv{t: t, db: db, spec: newSpecChecker(t), token: pair.AccessToken, userID: user.ID, up: map[int]bool{}}
+	e := &devEnv{t: t, db: db, spec: newSpecChecker(t), token: pair.AccessToken, userID: user.ID, up: map[int]bool{}, logs: logs}
+	e.cf = ddnstest.New(cfTestToken)
+	t.Cleanup(e.cf.Close)
+	e.cf.Zones = []ddnstest.Zone{{ID: "zone1", Name: "example.com"}, {ID: "zone2", Name: "Another.org"}}
+	e.cf.Records["zone1"] = []ddnstest.Record{
+		{ID: "rec1", Name: "home.example.com", Type: "A", Content: "8.8.4.4", TTL: 300},
+		{ID: "rec2", Name: "home6.example.com", Type: "AAAA", Content: "2606:4700:4700::1001", TTL: 1, Proxied: true},
+		{ID: "rec3", Name: "alias.example.com", Type: "CNAME", Content: "home.example.com", TTL: 1},
+		{ID: "rec4", Name: "cam.example.com", Type: "A", Content: "8.8.4.4", TTL: 120},
+	}
+	e.cf.Records["zone2"] = []ddnstest.Record{{ID: "rec9", Name: "x.another.org", Type: "A", Content: "8.8.4.4", TTL: 1}}
+	cfClient, err := ddns.NewCloudflare(e.cf.URL(), true, &http.Client{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.ip = &scriptedIP{v4: "8.8.8.8", v6: "2606:4700:4700::1111"}
+	e.ddnsSvc = ddns.NewService(ddns.ServiceConfig{Repo: ddns.NewSQLiteRepository(db), Sealer: sealer, DNS: cfClient, IP: e.ip, Log: log})
+	e.metrics = &swapMetrics{p: &system.Cached{Provider: system.NewGopsutil(system.GopsutilConfig{DataDir: t.TempDir(), Started: time.Now()}), TTL: time.Second}}
 	devRepo := devices.NewSQLiteRepository(db)
 	devSvc := devices.NewService(devRepo, nil)
 	monCfg := monitoring.Config{Store: devRepo, Log: log, Tick: 5 * time.Second, Concurrency: 4, OfflineThreshold: 2}
@@ -156,7 +185,7 @@ func newDevEnvOpts(t *testing.T, mutate func(*config.Controller), realProbe bool
 	srv, err := New(Deps{
 		Config: cfg, Log: log, DB: db, Auth: authSvc,
 		Devices: devSvc, Commands: e.engine, Monitor: e.mon, Audit: writer,
-		ControllerKey: key, Activity: activity.NewService(db),
+		ControllerKey: key, Activity: activity.NewService(db), DDNS: e.ddnsSvc, Metrics: e.metrics,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -164,6 +193,34 @@ func newDevEnvOpts(t *testing.T, mutate func(*config.Controller), realProbe bool
 	e.h = srv.Handler()
 	return e
 }
+
+// swapMetrics lets a test replace the metrics provider behind the router.
+type swapMetrics struct {
+	mu sync.Mutex
+	p  platform.MetricsProvider
+}
+
+func (s *swapMetrics) set(p platform.MetricsProvider) { s.mu.Lock(); s.p = p; s.mu.Unlock() }
+
+func (s *swapMetrics) Collect(ctx context.Context) (platform.Metrics, error) {
+	s.mu.Lock()
+	p := s.p
+	s.mu.Unlock()
+	return p.Collect(ctx)
+}
+
+// logBuffer collects the Controller's log output so a test can check no secret reached it.
+type logBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *logBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+func (l *logBuffer) String() string { l.mu.Lock(); defer l.mu.Unlock(); return l.b.String() }
 
 func (e *devEnv) setUp(port int, up bool) {
 	e.mu.Lock()

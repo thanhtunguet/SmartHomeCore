@@ -26,9 +26,11 @@ import (
 	"github.com/thanhtunguet/homecore/internal/commands"
 	"github.com/thanhtunguet/homecore/internal/config"
 	"github.com/thanhtunguet/homecore/internal/controllerkey"
+	"github.com/thanhtunguet/homecore/internal/ddns"
 	"github.com/thanhtunguet/homecore/internal/devices"
 	"github.com/thanhtunguet/homecore/internal/httpx"
 	"github.com/thanhtunguet/homecore/internal/monitoring"
+	"github.com/thanhtunguet/homecore/internal/platform"
 	"github.com/thanhtunguet/homecore/internal/storage"
 	"github.com/thanhtunguet/homecore/web"
 )
@@ -60,6 +62,9 @@ type Deps struct {
 
 	ControllerKey *controllerkey.Key // GET /system/controller-key; nil answers 501
 	Activity      *activity.Service  // GET /activity; nil answers 501
+
+	DDNS    *ddns.Service            // DDNS endpoints; nil answers 501
+	Metrics platform.MetricsProvider // GET /system/metrics; nil answers 501
 }
 
 // Server is the Controller HTTP server.
@@ -152,6 +157,7 @@ func newRouter(d Deps) (http.Handler, error) {
 	h.Auth = d.Auth
 	h.Devices, h.Commands, h.Monitor, h.Audit = d.Devices, d.Commands, d.Monitor, d.Audit
 	h.ControllerKey, h.Activity = d.ControllerKey, d.Activity
+	h.DDNS, h.Metrics = d.DDNS, d.Metrics
 	h.Info = handlers.InfoSource{Mode: string(d.Mode), Controller: d.Config}
 	gen.HandlerWithOptions(h, gen.ChiServerOptions{
 		BaseRouter: r,

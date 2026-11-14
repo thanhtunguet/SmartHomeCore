@@ -25,8 +25,12 @@ import (
 	"github.com/thanhtunguet/homecore/internal/retention"
 	"github.com/thanhtunguet/homecore/internal/secrets"
 	"github.com/thanhtunguet/homecore/internal/storage"
+	"github.com/thanhtunguet/homecore/internal/system"
 	"github.com/thanhtunguet/homecore/internal/version"
 )
+
+// metricsCacheTTL is how long one metrics snapshot is served; it is also the CPU sampling window.
+const metricsCacheTTL = 3 * time.Second
 
 // Options carries host-provided capabilities (used by the mobile bindings).
 type Options struct {
@@ -74,8 +78,6 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 	if err != nil {
 		return err
 	}
-	// TODO(phase-4): inject the sealer into DDNS tokens too.
-
 	authSvc, err := auth.NewService(ctx, auth.Config{
 		DB:         db,
 		Sealer:     sealer,
@@ -146,6 +148,27 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 		},
 	})
 
+	ddnsCfg := cfg.Controller.DDNS
+	discoverer, err := ddns.NewDiscoverer(ddns.DiscoveryConfig{Providers: ddnsCfg.IPProviders, AllowHTTP: ddnsCfg.AllowInsecureHTTP})
+	if err != nil {
+		return err
+	}
+	cloudflare, err := ddns.NewCloudflare(ddnsCfg.CloudflareAPIURL, ddnsCfg.AllowInsecureHTTP, nil)
+	if err != nil {
+		return err
+	}
+	ddnsSvc := ddns.NewService(ddns.ServiceConfig{
+		Repo: ddns.NewSQLiteRepository(db), Sealer: sealer, DNS: cloudflare, IP: discoverer,
+		Log: log.With("component", "ddns"),
+	})
+	syncer := ddns.NewSyncer(ddns.SyncerConfig{Service: ddnsSvc, Audit: auditWriter, Log: log.With("component", "ddns")})
+	// Metrics: gopsutil where the OS allows it (a metric it cannot read is reported as restricted),
+	// cached for a few seconds so polling cannot load the host. The Android provider arrives with Phase 5.
+	metrics := &system.Cached{
+		Provider: system.NewGopsutil(system.GopsutilConfig{DataDir: cfg.DataDir, Started: time.Now(), Log: log.With("component", "metrics")}),
+		TTL:      metricsCacheTTL,
+	}
+
 	srv, err := api.New(api.Deps{
 		Config:          cfg.Controller,
 		Mode:            cfg.Mode,
@@ -159,6 +182,8 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 		Audit:           auditWriter,
 		ControllerKey:   ctlKey,
 		Activity:        activity.NewService(db),
+		DDNS:            ddnsSvc,
+		Metrics:         metrics,
 	})
 	if err != nil {
 		return err
@@ -171,7 +196,7 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 	g.Go(func() error { return engine.Run(gctx) })  // command recovery and deadlines
 	g.Go(func() error { return prune.Run(gctx) })   // retention_days pruning
 	g.Go(func() error { return health.Run(gctx) })  // agent status (healthz) once a minute
-	// TODO(phase-4): g.Go(ddnsSyncer.Run).
+	g.Go(func() error { return syncer.Run(gctx) })  // Cloudflare DDNS
 	return g.Wait()
 }
 

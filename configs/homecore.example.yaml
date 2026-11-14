@@ -33,6 +33,19 @@ controller:
     wake_deadline: 180s
     shutdown_deadline: 120s
   retention_days: 30
+  ddns:                     # Cloudflare DDNS (docs/requirements/ddns.md); the defaults are fine for most setups
+    # Public-IP discovery asks these providers for the address they see this Controller connecting from,
+    # so every one of them learns your public IP; that is inherent to asking "what is my IP". At least
+    # two, on different hosts, https only. They must AGREE (two matching answers, no tie) before any DNS
+    # record is touched. A list here REPLACES the built-in one. Do not put credentials or API keys in the
+    # URLs unless you accept that they live in this file; they are never logged or returned.
+    ip_providers:
+      - https://api64.ipify.org
+      - https://icanhazip.com
+      - https://ifconfig.me/ip
+      - https://checkip.amazonaws.com
+    cloudflare_api_url: https://api.cloudflare.com/client/v4
+    allow_insecure_http: false  # tests and development only: accepts http:// providers and Cloudflare URL
 
 agent:
   listen: ":9750"           # LAN only. Never port-forward; use a VPN for remote access.

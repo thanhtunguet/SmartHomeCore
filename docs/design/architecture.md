@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1 |
-| Last reviewed | 2026-11-14 (Phase 3: shutdown dispatch, Controller key, agent status, activity feed) |
+| Last reviewed | 2026-11-14 (Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
 | Requirements | [requirements/overview.md](../requirements/overview.md) |
 | Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs) |
 | API contract | [api/openapi.yaml](../../api/openapi.yaml) (source of truth) |
@@ -323,11 +323,36 @@ Fields (see `devices` table): `id`, `name`, `description`, `hostname`, `ip_addre
 - Executes via `platform.PowerController` (Linux: `systemctl poweroff|reboot`; macOS: dry-run log).
 
 ### 6.7 DDNS (`internal/ddns`)
-Flow: scheduled job → discover public IP (≥ 2 providers, quorum) → validate v4/v6 → compare with
-last known → GET Cloudflare record → PATCH only if different → persist state + `ddns_sync_history`.
-- Multiple records; `A` and `AAAA`; per-config interval; manual `POST /ddns/{id}/sync`.
-- Retry with exponential backoff (1 s → 5 min cap, jitter) on transient errors.
-- API token per config, sealed at rest; documented minimum scope: `Zone → DNS → Edit` on one zone.
+Implemented in Phase 4 ([requirements/ddns.md](../requirements/ddns.md), [ADR-016](decisions.md#adr-016--phase-4-decisions-public-ip-quorum-record-ids-ddns-state-and-metrics)).
+
+```
+Syncer.Run (5 s tick, own schedule + backoff per config, 4 syncs at once)  ┐
+POST /ddns/{id}/sync                                                      ┴─> Service.Sync(id)   serialised per config
+   Discoverer.PublicIP(family)      >= 2 providers agree, no tie, public range only; 10 s shared cache
+   Cloudflare.GetRecord(id)         must still be the configured type + name, else permanent failure, no write
+   Cloudflare.UpdateRecord(id)      PATCH {content, proxied, ttl} only if one differs
+   Repository.SaveOutcome           conditional on updated_at; state + one ddns_sync_history row, one tx
+   (scheduler only) audit "ddns.sync" when the record changed
+```
+
+- Packages: `discover.go` (quorum), `cloudflare.go` (stdlib REST client, no SDK), `repo*.go`
+  (repository interface + SQLite), `service.go` (CRUD, lookups, one sync), `syncer.go` (the job),
+  `ddnstest/` (in-memory Cloudflare for tests). `internal/app` builds them and runs `Syncer.Run`
+  in the errgroup; handlers (`handlers_ddns.go`) call `ddns.Service` only.
+- **The record is chosen, not found.** Zone and record come from the lookups
+  (`POST /ddns/cloudflare/zones`, `.../zones/{zone_id}/records`), are stored by id, and the Controller
+  never resolves a record by name. A sync that finds a record whose type or name no longer matches
+  fails without writing.
+- Multiple records (one configuration per Cloudflare record); `A` and `AAAA` (AAAA asks for an IPv6
+  address); per-config interval (60 s to 24 h); manual `POST /ddns/{id}/sync`, same code path.
+- Retry with exponential backoff (1 s → 5 min cap, jittered to 50..100 %, never longer than the
+  configuration's interval; `Retry-After` honoured) on transient errors (network, `429`, `5xx`,
+  quorum failure). Bad token or a mismatching record is permanent: the next normal interval.
+- API token per config, sealed at rest (AAD `ddns_configs.api_token`), used only in the
+  `Authorization` header of Cloudflare requests; documented minimum scope: `Zone → Zone → Read` and
+  `Zone → DNS → Edit` on the zone. Cloudflare requests: 10 s timeout, no redirects, the environment's proxy is honoured; public-IP discovery never uses a proxy (it would report the proxy's address).
+- Configuration: `controller.ddns.ip_providers`, `cloudflare_api_url`, `allow_insecure_http`
+  (REQ-RT-013). The providers see the Controller's public IP (inherent, documented).
 
 ### 6.8 Storage (`internal/storage`)
 - `modernc.org/sqlite` (pure Go). DSN pragmas: `journal_mode=WAL`, `busy_timeout=5000`,
@@ -347,9 +372,19 @@ last known → GET Cloudflare record → PATCH only if different → persist sta
 - The JWT signing key and the Controller signing key are **different keys** (brief §6).
 
 ### 6.10 System metrics (`internal/system`)
-`SystemMetricsProvider` interface: memory (total/available/used), CPU %, uptime, disk usage,
-local IPs, process RSS, Go runtime stats. Linux/macOS implementation uses `gopsutil` (Phase 4).
-Android implementation is supplied by the Kotlin host through a gomobile callback interface.
+`platform.MetricsProvider` (`Collect(ctx) (Metrics, error)`): memory (total/available/used), CPU %,
+core count, load average, uptime, kernel, disk usage of the data directory's file system, local IPs,
+process pid/uptime/RSS and Go runtime stats. Implemented in Phase 4 ([REQ-SYS-001..004](../requirements/ddns.md)):
+
+- `system.Gopsutil` (gopsutil v4, [ADR-016](decisions.md)) is built on `system.RuntimeProvider`
+  (what the Go runtime knows). A metric gopsutil cannot read is named in `Metrics.Restricted`
+  (`restricted` in the API) and the rest is still returned.
+- CPU % is the delta between two samples, so the first call waits ~250 ms (up to ~750 ms on macOS)
+  and later ones never block; a missing sample is reported as absent, never as `0`.
+- `system.Cached` (3 s TTL, set in `internal/app`) serves one snapshot per TTL to all callers, so
+  polling cannot make the host work harder.
+- Android: the implementation is to be supplied by the Kotlin host through a gomobile callback
+  interface (Phase 5). `mobile` and `app.Options` were not changed in Phase 4.
 
 ### 6.11 Scheduler (`internal/scheduler`)
 `scheduler.Every(ctx, interval, jitter, fn)` — a ticker loop with jitter and panic recovery. No cron

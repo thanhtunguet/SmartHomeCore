@@ -22,6 +22,7 @@ docs/
 | [authentication.md](requirements/authentication.md) | `REQ-AUTH`: passwords, JWT, refresh rotation and grace window, audit, `homecore user` |
 | [devices-and-commands.md](requirements/devices-and-commands.md) | `REQ-DEV`, `REQ-MON`, `REQ-CMD`, `REQ-RET`: device registry, monitor, wake and command lifecycle, retention |
 | [storage-and-secrets.md](requirements/storage-and-secrets.md) | `REQ-ST`, `REQ-SEC`: SQLite, migrations, master key, sealing |
+| [ddns.md](requirements/ddns.md) | `REQ-DDNS`, `REQ-SYS`: public-IP quorum, Cloudflare client, DDNS configs and syncer, system metrics |
 | [shutdown-agent.md](requirements/shutdown-agent.md) | `REQ-AG`: signed commands, replay protection, least-privilege execution |
 | [web-ui.md](requirements/web-ui.md) | `REQ-UI`: frontend submodule, embedded build, session, flows against the REST API |
 

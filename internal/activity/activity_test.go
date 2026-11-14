@@ -200,6 +200,12 @@ func TestMessages(t *testing.T) {
 		{Raw{Action: "device.update", Result: "ok", Details: `{"name":"tv"}`, DeviceName: "renamed"}, "Device tv updated"},
 		{Raw{Action: "controller_key.create", Actor: "system", Result: "ok", Details: `{"key_id":"3f9a0c1d2b4e5f60"}`}, "Controller signing key created (key_id 3f9a0c1d2b4e5f60)"},
 		{Raw{Action: "ddns.future", Result: "ok", Details: `not json`}, "ddns.future"},
+		{Raw{Action: "ddns.create", Result: "ok", Details: `{"name":"Home","record_name":"home.example.com"}`}, "DDNS configuration Home (home.example.com) created"},
+		{Raw{Action: "ddns.update", Result: "ok", Details: `{"name":"home.example.com","record_name":"home.example.com","fields":["api_token"]}`}, "DDNS configuration home.example.com updated"},
+		{Raw{Action: "ddns.delete", Result: "ok", Details: `{"name":"Home"}`}, "DDNS configuration Home deleted"},
+		{Raw{Action: "ddns.sync", Actor: "system", Result: "ok", Details: `{"record_name":"home.example.com","ip":"8.8.4.4","sync_result":"updated"}`}, "home.example.com updated to 8.8.4.4"},
+		{Raw{Action: "ddns.sync", Actor: "alice", Result: "ok", Details: `{"record_name":"home.example.com","ip":"8.8.4.4","sync_result":"unchanged"}`}, "home.example.com checked: already up to date (8.8.4.4)"},
+		{Raw{Action: "ddns.sync", Actor: "alice", Result: "failed", Details: `{"record_name":"home.example.com","error":"cloudflare: Invalid API Token (HTTP 403)"}`}, "DDNS sync of home.example.com failed"},
 	}
 	for _, tc := range cases {
 		if got := toItem(tc.raw).Message; got != tc.want {

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | [`BRIEF.md`](../../BRIEF.md) (Technical Brief v0.1, Vietnamese) |
-| Last reviewed | 2026-11-14 (Phase 3) |
+| Last reviewed | 2026-11-14 (Phase 4) |
 | Owner | Project maintainers |
 
 This document turns the brief into the project's requirements baseline. It records which brief
@@ -57,7 +57,7 @@ One build supports both roles; configuration selects `controller`, `agent` or `b
 | Secure shutdown Agent on Linux | **Implemented** (Phase 3): Agent plus Controller dispatcher, `shutdownDevice`, Controller key, agent status and health job; systemd/polkit host validation pending | [shutdown-agent.md](shutdown-agent.md) |
 | SQLite | **Implemented** | [storage-and-secrets.md](storage-and-secrets.md) |
 | JWT authentication | **Implemented** (Phase 1b): argon2id, HS256 access tokens, rotating refresh tokens with reuse detection and grace window, `homecore user` CLI; no roles (ADR-011) | [authentication.md](authentication.md) |
-| Cloudflare DDNS | **Planned** | Phase 4 |
+| Cloudflare DDNS | **Implemented** (Phase 4): public-IP quorum, Cloudflare client, sealed tokens, scheduled and manual sync with backoff, zone/record lookups, audit; not yet run against the real Cloudflare | [ddns.md](ddns.md) |
 | Swagger UI at `/api/docs` | **Implemented** | [http-api.md](http-api.md) |
 | Static file serving | **Implemented** (UI embedded via `make build-full`; placeholder otherwise) | [http-api.md](http-api.md), [web-ui.md](web-ui.md) |
 
@@ -80,6 +80,7 @@ has a stable ID, a status and the test that verifies it.
 | [authentication.md](authentication.md) | `REQ-AUTH` | §3.1 (JWT), §6.1, §6.6, §6.7 (audit) |
 | [storage-and-secrets.md](storage-and-secrets.md) | `REQ-ST`, `REQ-SEC` | §3.7, §6 (secrets) |
 | [shutdown-agent.md](shutdown-agent.md) | `REQ-AG`, `REQ-SHD` | §3.5, §6 (agent zone, Controller key, shutdown dispatch) |
+| [ddns.md](ddns.md) | `REQ-DDNS`, `REQ-SYS` | §3.6 (DDNS), §3.8 (system metrics), §6.4 |
 | [web-ui.md](web-ui.md) | `REQ-UI` | §3.1 (static frontend), UI for §3.3–3.6 |
 
 Status vocabulary used everywhere:
@@ -100,7 +101,7 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 
 | # | Brief point | Status | Ref |
 |---|-------------|--------|-----|
-| 1.1 | Controller role: central server (devices, monitoring, WOL, shutdown, DDNS, REST API) | Partial (DDNS pending, Phase 4) | REQ-RT-001, REQ-SHD-*, roadmap |
+| 1.1 | Controller role: central server (devices, monitoring, WOL, shutdown, DDNS, REST API) | Implemented (Phase 4 added DDNS and metrics) | REQ-RT-001, REQ-SHD-*, REQ-DDNS-* |
 | 1.2 | Agent role: light service on Linux/Windows that verifies shutdown commands | Implemented (Linux/macOS) | REQ-AG-* |
 | 1.3 | One build supports both roles, selected by configuration | Implemented | REQ-RT-001 |
 | 1.4 | Goals (scale, 24/7, low resources, shared logic, cross-compile, OpenAPI, security) | See §2 above | — |
@@ -141,7 +142,7 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 | 3.2.4 | `shutdown_secret` | Changed. Removed; Ed25519 trust instead | ADR-001 |
 | 3.2.5 | Advanced: `monitor_timeout`, `monitor_interval`, `wol_broadcast_address` | Implemented (schema, validated API, used by the monitor and WOL) | database, REQ-DEV-002 |
 | 3.2.6 | Advanced: `shutdown_protocol` | Changed. Single protocol v1, versioned in payload | [agent-protocol](../design/agent-protocol.md) |
-| 3.2.7 | Never return secrets from read APIs | Implemented by design (no secret columns on devices; DDNS token write-only in spec) | REQ-SEC-004 |
+| 3.2.7 | Never return secrets from read APIs | Implemented (no secret columns on devices; the DDNS token is write-only and only `has_api_token` is returned, tested) | REQ-SEC-004, REQ-DDNS-004 |
 | 3.2.8 | Device CRUD | Implemented (Phase 2) | REQ-DEV-001..011 |
 
 ### §3.3 Online device monitor
@@ -184,13 +185,13 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 
 | # | Brief point | Status | Ref |
 |---|-------------|--------|-----|
-| 3.6.1 | Scheduled public-IP check and DNS update flow | Planned (interfaces defined) | Phase 4 |
-| 3.6.2 | Multiple records; A and AAAA | Planned (schema + spec ready) | database |
-| 3.6.3 | Configurable interval; manual refresh | Planned (spec ready) | Phase 4 |
-| 3.6.4 | Retry with exponential backoff | Planned | Phase 4 |
-| 3.6.5 | Scoped Cloudflare token | Planned (token sealed at rest by design) | REQ-SEC-003 |
-| 3.6.6 | Store last success and last error | Implemented (schema) | database |
-| 3.6.7 | Several public-IP providers, handle disagreement | Planned (quorum design) | [architecture §6.7](../design/architecture.md) |
+| 3.6.1 | Scheduled public-IP check and DNS update flow | Implemented (Phase 4) | REQ-DDNS-006, REQ-DDNS-007 |
+| 3.6.2 | Multiple records; A and AAAA | Implemented (one configuration per record) | REQ-DDNS-003, REQ-DDNS-006 |
+| 3.6.3 | Configurable interval; manual refresh | Implemented (`interval_seconds` 60..86400; `POST /ddns/{id}/sync`) | REQ-DDNS-003, REQ-DDNS-006 |
+| 3.6.4 | Retry with exponential backoff | Implemented (1 s to 5 min, jittered, `Retry-After` honoured) | REQ-DDNS-007 |
+| 3.6.5 | Scoped Cloudflare token | Implemented (a token per configuration, sealed at rest, sent only as a bearer header; the Controller needs only `Zone: Read` and `DNS: Edit`) | REQ-DDNS-004, REQ-SEC-003 |
+| 3.6.6 | Store last success and last error | Implemented (`last_ip`, `last_synced_at`, `last_error`, `last_error_at`, plus `detected_ip`, `dns_value`, `last_checked_at` and `ddns_sync_history`) | REQ-DDNS-006 |
+| 3.6.7 | Several public-IP providers, handle disagreement | Implemented (at least 2 must agree, a tie fails, public ranges only) | REQ-DDNS-001, [ADR-016](../design/decisions.md#adr-016--phase-4-decisions-public-ip-quorum-record-ids-ddns-state-and-metrics) |
 
 ### §3.7 SQLite storage
 
@@ -209,15 +210,15 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 
 | # | Brief point | Status | Ref |
 |---|-------------|--------|-----|
-| 3.8.1 | Memory, CPU, uptime, disk, local IPs, process memory, Go runtime metrics | Partial (`MetricsProvider` interface; runtime-only provider) | Phase 4 |
-| 3.8.2 | `gopsutil` on Linux | Planned | Phase 4 |
+| 3.8.1 | Memory, CPU, uptime, disk, local IPs, process memory, Go runtime metrics | Implemented (Phase 4; unreadable metrics are listed in `restricted`) | REQ-SYS-001..004 |
+| 3.8.2 | `gopsutil` on Linux | Implemented (gopsutil v4; exercised on macOS only: Linux is covered by the cross build, not by a run) | REQ-SYS-001 |
 | 3.8.3 | Android-specific provider via Kotlin | Planned | Phase 5 |
 
 ### §4 API design
 
 | # | Brief point | Status | Ref |
 |---|-------------|--------|-----|
-| 4.1 | All draft endpoints (auth, devices, wake/shutdown/probe/history, metrics, DDNS, commands, docs) | Specified in `api/openapi.yaml`; health, docs, `/auth/*`, `/system/info`, devices (CRUD, probe, history, wake, agent removal) and commands implemented; shutdown, controller key and activity (Phase 3) implemented; the rest (metrics, DDNS) return 501 with a valid token (401 without) | REQ-API-006 |
+| 4.1 | All draft endpoints (auth, devices, wake/shutdown/probe/history, metrics, DDNS, commands, docs) | Specified in `api/openapi.yaml`; health, docs, `/auth/*`, `/system/info`, devices (CRUD, probe, history, wake, agent removal) and commands implemented; shutdown, controller key and activity (Phase 3) implemented; DDNS and system metrics (Phase 4) implemented, so no documented operation returns 501 any more | REQ-API-006, REQ-API-020, REQ-API-025 |
 | 4.2 | Wake/shutdown create a `command_id`; HTTP does not wait for the machine | Wake Implemented (`202` + `Command`, dedup enforced in DB); shutdown Implemented (Phase 3: `202` + `Command`, idempotent, fail-fast) | REQ-ST-005, REQ-CMD-001/003, REQ-SHD-008 |
 
 ### §5 Source code architecture
@@ -237,11 +238,11 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 | 6.1 | Public API: JWT + roles | Implemented; **roles dropped** (ADR-011) | REQ-API-007, REQ-API-008, REQ-AUTH-* |
 | 6.2 | Agent listener: signature + allowlist only | Implemented | REQ-AG-* |
 | 6.3 | Swagger UI grants no permission | Implemented | REQ-API-003 |
-| 6.4 | Cloudflare client with scoped token | Planned | Phase 4 |
+| 6.4 | Cloudflare client with scoped token | Implemented (Phase 4; tested against a fake, not the live API) | REQ-DDNS-002 |
 | 6.5 | Never expose the Agent to the Internet; prefer VPN | Documented (`deploy/README.md`, config comments) | REQ-AG-012 |
 | 6.6 | JWT secret ≠ Agent secret | Implemented (JWT key, master key and the Controller Ed25519 key are three distinct secrets; the Controller key is generated and sealed in Phase 3) | REQ-AUTH-004, REQ-SEC-005, REQ-SHD-001 |
 | 6.7 | Shutdown requires admin and writes audit log | **Changed:** no roles (ADR-011), any authenticated user. `audit_log` writer exists (`internal/audit`, used by login/logout/account changes and, since Phase 2, device create/update/delete/agent removal/wake); since Phase 3 `shutdownDevice` writes `device.shutdown` (result ok/failed) and key creation writes `controller_key.create` | REQ-API-008, REQ-AUTH-014, REQ-DEV-010, REQ-SHD-009 |
-| 6.8 | Private keys and Cloudflare tokens protected at rest | Partial (sealer used for the JWT key, refresh-grace copies and, since Phase 3, the Controller key; DDNS tokens pending, Phase 4) | REQ-SEC-002, REQ-AUTH-004, REQ-SHD-001 |
+| 6.8 | Private keys and Cloudflare tokens protected at rest | Implemented (sealer used for the JWT key, refresh-grace copies, the Controller key since Phase 3 and the DDNS tokens since Phase 4) | REQ-SEC-002, REQ-SEC-003, REQ-AUTH-004, REQ-SHD-001, REQ-DDNS-004 |
 | 6.9 | Acknowledge before executing shutdown | Implemented | REQ-AG-009 |
 | 6.10 | Agent only runs predefined commands | Implemented | REQ-AG-005 |
 | 6.11 | Agent runs with least privilege | Implemented (polkit + hardened systemd unit; host validation pending) | REQ-AG-011 |

@@ -5,8 +5,8 @@
 | Brief | §3.7, §6 (protection of keys and tokens) |
 | Code | `internal/storage`, `internal/storage/migrations`, `internal/secrets` |
 | Design | [database.md](../design/database.md), [architecture §6.8–6.9](../design/architecture.md), [ADR-004](../design/decisions.md#adr-004--sqlite-driver-moderncorgsqlite-everywhere) |
-| Last updated | 2026-11-14 (Phase 3) |
-| Status | **Implemented** (storage layer + schema); Controller key sealed since Phase 3; DDNS repository planned |
+| Last updated | 2026-11-14 (Phase 4) |
+| Status | **Implemented** (storage layer + schema); Controller key sealed since Phase 3; DDNS tokens sealed since Phase 4 |
 
 ## Storage
 
@@ -26,13 +26,13 @@
 |----|-------------|--------|-------------|
 | REQ-SEC-001 | A 32-byte master key is resolved in this order: `HOMECORE_MASTER_KEY` (base64) → key supplied by the host (Android Keystore through `mobile.Start`) → `<data_dir>/master.key`. The key file is created exclusively, mode `0600`, and fsynced. A malformed key stops startup. | Implemented | `TestMasterKeyPersistsWithStrictPermissions` |
 | REQ-SEC-002 | Secrets are sealed with AES-256-GCM as `nonce ‖ ciphertext`, with associated data naming the column (e.g. `ddns_configs.api_token`). Opening fails on tampering or wrong associated data. | Implemented | `TestSealOpenBindsAssociatedData` |
-| REQ-SEC-003 | Secret material is stored only in sealed BLOB columns: `controller_keys.private_key_sealed`, `ddns_configs.api_token_sealed`, `refresh_tokens.successor_sealed` (short-lived, wiped after 10 s), secret entries of `system_settings` (the JWT key). Refresh tokens are stored only as SHA-256 hashes; passwords only as argon2id hashes. | **Partial.** Implemented for the JWT key, refresh tokens and passwords (Phase 1b) and, since Phase 3, the Controller key (`internal/controllerkey`, [REQ-SHD-001](shutdown-agent.md)); the writer for DDNS tokens is planned (Phase 4) | `TestSigningKeyIsGeneratedOnceSealedAndDistinctFromMasterKey`, `TestRefreshTokensAreStoredOnlyAsHashes`, `TestSealedSuccessorIsWipedAfterTheWindow`, `TestKeyIsCreatedOnceSealedAndStable`, `TestTamperedRowIsRejected` |
-| REQ-SEC-004 | API responses never contain secrets: devices have no secret fields; the DDNS `api_token` is `writeOnly` and reported only as `has_api_token`. | Implemented (spec) | `api/openapi.yaml` |
+| REQ-SEC-003 | Secret material is stored only in sealed BLOB columns: `controller_keys.private_key_sealed`, `ddns_configs.api_token_sealed`, `refresh_tokens.successor_sealed` (short-lived, wiped after 10 s), secret entries of `system_settings` (the JWT key). Refresh tokens are stored only as SHA-256 hashes; passwords only as argon2id hashes. | **Implemented** for the JWT key, refresh tokens and passwords (Phase 1b) the Controller key (Phase 3, `internal/controllerkey`, [REQ-SHD-001](shutdown-agent.md)) and, since Phase 4, the DDNS API tokens (`ddns.Service` seals with AAD `ddns_configs.api_token`, [REQ-DDNS-004](ddns.md)) | `TestSigningKeyIsGeneratedOnceSealedAndDistinctFromMasterKey`, `TestRefreshTokensAreStoredOnlyAsHashes`, `TestSealedSuccessorIsWipedAfterTheWindow`, `TestKeyIsCreatedOnceSealedAndStable`, `TestTamperedRowIsRejected`, `ddns.TestCreateSealsTheTokenAndStoresTheRecordID`, `ddns.TestRepositoryRoundTripAndConstraints` (the stored column is not the plaintext and opens only with the right AAD); smoke test 2026-11-14 (the token is absent from the database file, WAL, log and audit rows) |
+| REQ-SEC-004 | API responses never contain secrets: devices have no secret fields; the DDNS `api_token` is `writeOnly` and reported only as `has_api_token`. | Implemented | `api/openapi.yaml`; `TestDDNSLifecycleOverHTTP` and `TestDDNSActivityFeed` (responses and the feed carry no token; `specChecker` validates every body); the `restricted` fields never include secrets |
 | REQ-SEC-005 | The master key, the JWT signing key and the Controller Ed25519 signing key are distinct keys. | **Implemented** (Phase 3). Master key, JWT key (REQ-AUTH-004) and Controller Ed25519 key (REQ-SHD-001) are independent random values | `TestSigningKeyIsGeneratedOnceSealedAndDistinctFromMasterKey`, `TestKeyIsDistinctFromJWTAndMasterKey` |
 
 ## Known gaps
 
-- Domain repositories exist only for users and refresh tokens (`internal/auth`); devices, commands and DDNS are planned.
+- Domain repositories exist for users and refresh tokens (`internal/auth`), devices, commands, the Controller key and DDNS (`internal/ddns`).
 - `Backup` has no test and no admin endpoint.
-- Retention pruning (`retention_days`) is configured but not implemented for devices, commands and DDNS; refresh tokens are pruned by the auth maintenance job (REQ-AUTH-013).
+- Retention pruning (`retention_days`) covers commands, device status history and DDNS sync history ([REQ-RET-001](devices-and-commands.md)); refresh tokens are pruned by the auth maintenance job (REQ-AUTH-013).
 - SQLite has not been run on a real Android device (Phase 0 spike).

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -69,7 +70,32 @@ type Controller struct {
 	Monitor            Monitor  `yaml:"monitor"`
 	Commands           Commands `yaml:"commands"`
 	RetentionDays      int      `yaml:"retention_days"`
+	DDNS               DDNS     `yaml:"ddns"`
 }
+
+// DDNS configures public-IP discovery and the Cloudflare client of the DDNS job.
+type DDNS struct {
+	// IPProviders are URLs that answer a plain GET with the caller's public address as bare text.
+	// At least two, on different hosts; they must agree before DNS is touched. The providers learn
+	// this Controller's public IP, which is inherent to asking "what is my IP".
+	IPProviders []string `yaml:"ip_providers"`
+	// CloudflareAPIURL is the Cloudflare v4 API root (a fake server in tests).
+	CloudflareAPIURL string `yaml:"cloudflare_api_url"`
+	// AllowInsecureHTTP accepts http:// provider and Cloudflare URLs. Development and tests only.
+	AllowInsecureHTTP bool `yaml:"allow_insecure_http"`
+}
+
+// DefaultIPProviders are well-known plain-text endpoints on different operators. api64.ipify.org,
+// icanhazip.com and ifconfig.me answer over IPv4 and IPv6; checkip.amazonaws.com is IPv4 only.
+var DefaultIPProviders = []string{
+	"https://api64.ipify.org",
+	"https://icanhazip.com",
+	"https://ifconfig.me/ip",
+	"https://checkip.amazonaws.com",
+}
+
+// DefaultCloudflareAPIURL is the Cloudflare v4 API root.
+const DefaultCloudflareAPIURL = "https://api.cloudflare.com/client/v4"
 
 // Auth configures user authentication.
 type Auth struct {
@@ -141,6 +167,10 @@ func Default() Config {
 				ShutdownDeadline: 120 * time.Second,
 			},
 			RetentionDays: 30,
+			DDNS: DDNS{
+				IPProviders:      slices.Clone(DefaultIPProviders),
+				CloudflareAPIURL: DefaultCloudflareAPIURL,
+			},
 		},
 		Agent: Agent{
 			Listen:         ":9750",
@@ -263,6 +293,9 @@ func (c Config) Validate() error {
 		if ctl.RetentionDays < 0 {
 			add("controller.retention_days: must be >= 0 (0 keeps everything)")
 		}
+		for _, e := range validateDDNS(ctl.DDNS) {
+			add("controller.ddns.%s", e)
+		}
 	}
 
 	if c.Mode.RunsAgent() {
@@ -294,6 +327,36 @@ func (c Config) Validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// validateDDNS checks the DDNS keys; the messages are prefixed with "controller.ddns." by the caller.
+func validateDDNS(d DDNS) []string {
+	var errs []string
+	if len(d.IPProviders) < 2 {
+		errs = append(errs, fmt.Sprintf("ip_providers: at least 2 providers are required (they must agree), got %d", len(d.IPProviders)))
+	}
+	hosts := map[string]bool{}
+	for _, raw := range d.IPProviders {
+		u, err := url.Parse(raw)
+		switch {
+		case err != nil || u.Host == "" || u.User != nil:
+			errs = append(errs, fmt.Sprintf("ip_providers: %q is not a valid URL without credentials", raw))
+		case u.Scheme != "https" && !(d.AllowInsecureHTTP && u.Scheme == "http"):
+			errs = append(errs, fmt.Sprintf("ip_providers: %q must use https (allow_insecure_http is for development only)", u.Hostname()))
+		case hosts[strings.ToLower(u.Hostname())]:
+			errs = append(errs, fmt.Sprintf("ip_providers: %q is listed twice; providers must be on different hosts to be independent", u.Hostname()))
+		default:
+			hosts[strings.ToLower(u.Hostname())] = true
+		}
+	}
+	u, err := url.Parse(d.CloudflareAPIURL)
+	switch {
+	case err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "":
+		errs = append(errs, "cloudflare_api_url: must be an absolute URL without credentials, query or fragment")
+	case u.Scheme != "https" && !(d.AllowInsecureHTTP && u.Scheme == "http"):
+		errs = append(errs, "cloudflare_api_url: must use https (allow_insecure_http is for development only)")
+	}
+	return errs
 }
 
 func validListen(addr string) error {

@@ -5,7 +5,7 @@
 | Brief | §3.2 (devices, online monitoring), §3.3 (Wake-on-LAN), §3.4 (commands, "wake many"), §4 (REST API), §6 |
 | Code | `internal/devices` (`device.go`, `validate.go`, `service.go`, `repo.go`, `repo_sqlite.go`), `internal/monitoring` (`monitoring.go`, `monitor.go`), `internal/commands` (`commands.go`, `engine.go`, `wake.go`, `repo.go`, `repo_sqlite.go`), `internal/wol`, `internal/retention`, `internal/page`, `internal/api/handlers/handlers_devices.go`, `handlers_commands.go`, `internal/app/app.go`; shutdown dispatcher and agent status: `internal/agentctl` ([shutdown-agent.md](shutdown-agent.md)) |
 | Design | [architecture §6.2, §6.3, §6.5, §8, §9](../design/architecture.md), [database.md](../design/database.md) (`devices`, `agent_bindings`, `device_status_history`, `commands`, §5 lifecycle), [ADR-003](../design/decisions.md), [ADR-012](../design/decisions.md#adr-012--idempotent-fail-fast-power-commands-with-a-per-device-throttle), [ADR-014](../design/decisions.md#adr-014--phase-2-decisions-manual-probes-feed-hysteresis-client-side-wake-many-urgent-probing) |
-| Last updated | 2026-11-14 (Phase 3: shutdown, agent status) |
+| Last updated | 2026-11-14 (Phase 4: REQ-RET-001 DDNS history prune now tested; earlier: Phase 3 shutdown, agent status) |
 | Status | **Implemented** for devices, monitoring, wake, shutdown, command history and retention (the shutdown dispatcher and its requirements are in [shutdown-agent.md](shutdown-agent.md), REQ-SHD-*) |
 
 Every endpoint response is validated against `api/openapi.yaml` by the test helper in
@@ -64,7 +64,7 @@ unless a package is given.
 
 | ID | Requirement | Status | Verified by |
 |----|-------------|--------|-------------|
-| REQ-RET-001 | A retention job (`Run(ctx)`) prunes, at start and then hourly, rows older than `controller.retention_days`: terminal commands (by `updated_at`), `device_status_history` and `ddns_sync_history`. Deletes are batched (500 rows per statement). Active commands are never pruned. `retention_days: 0` disables pruning. A failing table does not stop the others. | Implemented | `retention.TestPrunesOldRowsInBatchesAndKeepsRecentAndActiveOnes`, `retention.TestRunDisabledAndStopsOnCancel`, `retention.TestPruneErrorStopsThatTargetOnly`, `commands.TestPruneTerminalKeepsActiveCommands`, `devices.TestPruneHistory`. The `ddns_sync_history` SQL has no test of its own (the table is empty until Phase 4) |
+| REQ-RET-001 | A retention job (`Run(ctx)`) prunes, at start and then hourly, rows older than `controller.retention_days`: terminal commands (by `updated_at`), `device_status_history` and `ddns_sync_history`. Deletes are batched (500 rows per statement). Active commands are never pruned. `retention_days: 0` disables pruning. A failing table does not stop the others. | Implemented | `retention.TestPrunesOldRowsInBatchesAndKeepsRecentAndActiveOnes`, `retention.TestRunDisabledAndStopsOnCancel`, `retention.TestPruneErrorStopsThatTargetOnly`, `commands.TestPruneTerminalKeepsActiveCommands`, `devices.TestPruneHistory`, `ddns.TestPruneSyncHistory` (the `ddns_sync_history` SQL, real SQLite; the table is filled since Phase 4) |
 | REQ-RET-002 | `audit_log` is not pruned. | Implemented | n/a |
 
 ## Known gaps
@@ -73,6 +73,5 @@ unless a package is given.
 - The monitor's failure counters are in memory: after a restart an `online` device needs `offline_threshold` fresh failures to go `offline` (the stored status itself survives).
 - `monitor_interval_seconds` has a 5 s floor and the tick defaults to 5 s, so a device is never probed more often than the tick; an active command is probed every tick.
 - Hostname-based probing is implemented (`hostname` wins over `ip_address`) but not exercised against a real DNS name in tests.
-- The retention SQL for `ddns_sync_history` is untested until Phase 4 fills the table.
 - Wake of a device with a broadcast address that is not on a reachable subnet succeeds as `sent` and then `timed_out`: UDP gives no delivery feedback.
 - No `total` count on lists, by design.
