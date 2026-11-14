@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | Brief §7 (phases), §8 (MVP); [architecture](../design/architecture.md) |
-| Last updated | 2026-11-14 (Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
+| Last updated | 2026-11-14 (build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
 
 Legend: `[x]` done and verified · `[~]` partially done · `[ ]` not started.
 Tick items in the same change that completes them, and add a changelog entry.
@@ -127,7 +127,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [ ] Resource benchmark: idle RSS < 30 MB, idle CPU ≈ 0 %
 - [ ] Backup/restore endpoint (`DB.Backup`) and restore procedure
 - [ ] CI pipeline: lint, test, race, `check-generated`, `cross`
-- [ ] Release pipeline for all targets
+- [ ] Release pipeline (partial): GitHub Actions `build.yml` builds the frontend zip and Linux amd64/arm64 packages and publishes them on `v*` tags; other targets (linux/arm, macOS, Windows, Android) still open
 - [ ] Windows agent: power adapter + Windows Service
 
 ## Backlog (known gaps from requirement docs)
@@ -150,7 +150,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 | Cut off access tokens at logout/password change (token version or `jti` deny-list), if the 15 min window ever matters | REQ-AUTH known gaps |
 | Per-account login lockout (only per-IP limit exists); separate rate-limit bucket for `refresh`/`logout` | REQ-AUTH known gaps |
 | Account creation on Android (no CLI): decide in Phase 5 how the host app calls `auth.Accounts` through `mobile` | REQ-RT known gaps |
-| Release pipeline must run `make ui-build` before `make cross` | GAP-INF-10 |
+| ~~Release pipeline must run `make ui-build` before `make cross`~~ done for Linux amd64/arm64 in `.github/workflows/build.yml`; remains for the other `make cross` targets | GAP-INF-10 |
 | Persist the monitor's consecutive-failure counters across restarts (today only the status survives) | REQ-MON-004 known gap |
 | Shorten the deadline sweep (5 s) or complete deadline exactly via a timer, if second-level accuracy of `timed_out` ever matters | REQ-CMD-006 |
 | Endpoint for `ddns_sync_history` (the UI sees only the `last_*` fields and the activity feed) | REQ-DDNS known gaps |

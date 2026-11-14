@@ -1,5 +1,13 @@
 # Deployment (Linux)
 
+Release archives (`homecore-<version>-linux-{amd64,arm64}.tar.gz`) are built by
+`.github/workflows/build.yml`. Each one holds the binary, `migrations/`, config example, systemd units,
+polkit rule and a `README.md` with install/upgrade steps for humans and AI agents. That README is generated
+from [package/README.md.tmpl](package/README.md.tmpl) by `scripts/package-backend.sh` (`make package` locally);
+**keep the template in sync with the commands below**.
+
+Manual install from a source build:
+
 ```bash
 # Controller
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin homecore

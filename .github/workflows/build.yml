@@ -1,0 +1,138 @@
+name: Build
+
+# Builds the frontend (zip) and the Linux backend packages (amd64 + arm64).
+# Every run uploads the files as workflow artifacts. A tag `vX.Y.Z` also publishes them as a GitHub Release.
+#
+# The `frontend/` git submodule is git@github.com:thanhtunguet/HomeCoreUI.git. actions/checkout rewrites that
+# SSH URL to HTTPS and authenticates with `token`. If HomeCoreUI is private, add a repository secret
+# SUBMODULE_TOKEN (fine-grained PAT, "Contents: read" on HomeCoreUI); the default GITHUB_TOKEN cannot read
+# other private repositories.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  meta:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      commit: ${{ steps.v.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # `git describe` needs the tags
+          persist-credentials: false
+      - id: v
+        run: |
+          echo "version=$(git describe --tags --always)" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+  frontend:
+    name: Frontend (zip)
+    needs: meta
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true # the commit pinned by the frontend gitlink
+          token: ${{ secrets.SUBMODULE_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # vite 8 needs >= 22.12
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+      - name: Build (same output dir as `make ui-build`)
+        working-directory: frontend
+        run: npm run build -- --outDir ../web/static --emptyOutDir
+      - name: Zip
+        run: |
+          test -f web/static/index.html
+          mkdir -p dist
+          (cd web/static && zip -qr "../../dist/homecore-ui-${VERSION}.zip" . -x .gitkeep)
+          unzip -l "dist/homecore-ui-${VERSION}.zip" | tail -n 1
+          (cd dist && sha256sum "homecore-ui-${VERSION}.zip" > "homecore-ui-${VERSION}.zip.sha256")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: homecore-ui
+          path: dist/*
+          compression-level: 0 # already a zip
+          if-no-files-found: error
+
+  backend:
+    name: Backend (linux/${{ matrix.arch }})
+    needs: [meta, frontend]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      COMMIT: ${{ needs.meta.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4 # no submodule: the UI comes from the frontend job
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          name: homecore-ui
+          path: ui
+      - name: Embed the frontend (web/static is embedded by the binary)
+        run: |
+          rm -rf web/static && mkdir -p web/static
+          unzip -q "ui/homecore-ui-${VERSION}.zip" -d web/static
+          touch web/static/.gitkeep
+          test -f web/static/index.html
+      - name: Build and package
+        run: scripts/package-backend.sh "${{ matrix.arch }}" "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: homecore-linux-${{ matrix.arch }}
+          path: build/dist/*
+          compression-level: 0 # already a tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [meta, frontend, backend]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd out
+          sha256sum -c ./*.sha256
+          cat ./*.sha256 > SHA256SUMS
+          rm ./*.sha256
+          ls -l
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes ./*

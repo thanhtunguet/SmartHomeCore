@@ -1,0 +1,256 @@
+# HomeCore @VERSION@ (linux/@GOARCH@)
+
+Release package of HomeCore: one static binary (`homecore`, CGO off, no runtime dependencies) that
+runs as **Controller** (API + web UI + SQLite), **Agent** (signed shutdown on a managed machine) or both.
+
+This file is written for an installing human **or AI agent**. Every step is a shell command; follow them
+in order and run the **Verify** command of each section before moving on.
+
+| | |
+|---|---|
+| Version | `@VERSION@` |
+| Commit | `@COMMIT@` |
+| Target | linux / `@GOARCH@` (`@UNAME_M@` in `uname -m`) |
+| Database schema | version `@SCHEMA_VERSION@` (newest migration in this package) |
+| Web UI | embedded in the binary, nothing to install separately |
+| Needs | Linux with systemd; `root` (sudo) for install. Agent power actions need polkit |
+
+Check this package matches the machine before installing: `uname -m` must print `@UNAME_M@`.
+
+## Package contents
+
+```
+homecore                              the binary (Controller, Agent and CLI in one)
+VERSION                               version, commit, target, schema version
+README.md                             this file
+configs/homecore.example.yaml         all config keys with defaults and comments
+deploy/systemd/homecore-controller.service
+deploy/systemd/homecore-agent.service
+deploy/polkit/50-homecore-agent.rules  lets only the agent user power off / reboot (Agent only)
+migrations/*.sql                      database migrations, FOR REFERENCE ONLY
+```
+
+**Migrations are compiled into the binary and applied automatically** when the Controller starts
+(each in its own transaction, oldest first, already-applied ones skipped). You never run the files in
+`migrations/` by hand; they are shipped so you can read what an upgrade changes in the schema.
+The Agent has no database.
+
+## Which role to install
+
+| Machine | Install |
+|---|---|
+| The one machine that hosts the API, the web UI and the database | **Controller** |
+| Every machine the Controller must be able to shut down | **Agent** (separate machine from the Controller, or the same one) |
+
+A Controller needs no Agent to work (device CRUD, TCP monitoring, Wake-on-LAN, DDNS). Install Agents only
+for remote shutdown.
+
+Run all commands below from the directory where this archive was extracted (`pwd` contains `homecore`).
+
+---
+
+## Install: Controller
+
+```bash
+set -euo pipefail
+
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin homecore || true   # ok if it exists
+sudo install -m 0755 homecore /usr/local/bin/homecore
+sudo install -d -m 0750 -o root -g homecore /etc/homecore
+# Do not overwrite an existing config on re-run:
+[ -f /etc/homecore/homecore.yaml ] || sudo install -m 0640 -g homecore configs/homecore.example.yaml /etc/homecore/homecore.yaml
+sudo install -m 0644 deploy/systemd/homecore-controller.service /etc/systemd/system/
+sudo systemctl daemon-reload
+```
+
+Edit `/etc/homecore/homecore.yaml` if needed (listen address, TLS, `trusted_proxies`, DDNS). The defaults
+work out of the box: listen `:8080`, data in `/var/lib/homecore` (created by systemd `StateDirectory`).
+
+```bash
+sudo systemctl enable --now homecore-controller
+```
+
+**Verify**
+
+```bash
+systemctl is-active homecore-controller                 # active
+curl -fsS http://127.0.0.1:8080/healthz                 # HTTP 200
+curl -fsS http://127.0.0.1:8080/readyz                  # HTTP 200 once the schema is current
+homecore --version                                      # @VERSION@ (@COMMIT@)
+```
+
+### First account (required: there is no default account)
+
+```bash
+# Run as the service user so the database file keeps its owner. Prompts for the password twice (min 12 chars).
+sudo -u homecore homecore user add --config /etc/homecore/homecore.yaml <username>
+# Non-interactive (script): HOMECORE_PASSWORD=<secret> sudo -E -u homecore homecore user add --config /etc/homecore/homecore.yaml <username>
+```
+
+Then open `http://<controller-host>:8080/` and sign in. API docs: `http://<controller-host>:8080/api/docs`.
+
+### Controller public key (needed by Agents)
+
+```bash
+sudo -u homecore homecore key show --config /etc/homecore/homecore.yaml
+```
+
+Copy the printed base64 public key; each Agent trusts it in `agent.trusted_controllers`.
+
+---
+
+## Install: Agent (on each managed machine)
+
+Needs the Controller public key from above.
+
+```bash
+set -euo pipefail
+
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin homecore-agent || true
+sudo install -m 0755 homecore /usr/local/bin/homecore
+sudo install -d -m 0750 -o root -g homecore-agent /etc/homecore
+sudo install -m 0644 deploy/polkit/50-homecore-agent.rules /etc/polkit-1/rules.d/
+sudo install -m 0644 deploy/systemd/homecore-agent.service /etc/systemd/system/
+```
+
+Create `/etc/homecore/agent.yaml` (mode 0640, group `homecore-agent`) **if it does not exist**:
+
+```yaml
+mode: agent
+agent:
+  listen: ":9750"            # LAN only. Never port-forward; use a VPN for remote access.
+  allowed_actions: [shutdown]   # shutdown | reboot
+  trusted_controllers:
+    - name: my-controller
+      public_key: "<base64 public key from `homecore key show`>"
+```
+
+```bash
+sudo chown root:homecore-agent /etc/homecore/agent.yaml && sudo chmod 0640 /etc/homecore/agent.yaml
+sudo systemctl daemon-reload
+sudo systemctl enable --now homecore-agent
+```
+
+**Verify**
+
+```bash
+systemctl is-active homecore-agent                       # active
+journalctl -u homecore-agent --no-pager | grep agent_id  # the id to bind to the device on the Controller
+```
+
+Then, in the web UI, bind that `agent_id` (and the agent URL, `http://<agent-ip>:9750`) to the device.
+
+Notes
+- polkit older than 0.106 (old Debian/Ubuntu) needs an equivalent `.pkla` file instead of the `.rules` JS file.
+- Keep the Agent port closed to the Internet (firewall it to the LAN / VPN subnet).
+- Agent and Controller can be installed on the same machine; use the two systemd units, they use separate users and data dirs.
+
+---
+
+## Upgrade
+
+Upgrades replace the binary and the unit files; **config and data are never touched** by the steps below.
+The Controller applies new migrations itself on the first start of the new binary.
+
+**Order: upgrade the Controller first, then the Agents.** Agents of an older release keep working with a
+newer Controller unless the release notes of the new version say the protocol changed.
+
+### Upgrade the Controller
+
+```bash
+set -euo pipefail
+
+# 1. Record where we are.
+homecore --version
+sudo sqlite3 /var/lib/homecore/homecore.db 'SELECT MAX(version) FROM schema_migrations;' 2>/dev/null || true  # optional, sqlite3 CLI may be absent
+
+# 2. Stop, then back up the WHOLE data directory (database, master.key, WAL files). Rollback needs this.
+sudo systemctl stop homecore-controller
+sudo cp -a /var/lib/homecore "/var/lib/homecore.bak-$(date +%Y%m%d-%H%M%S)"
+sudo cp -a /usr/local/bin/homecore /usr/local/bin/homecore.prev
+
+# 3. Install the new binary and unit file (extracted from this package), keep the existing config.
+sudo install -m 0755 homecore /usr/local/bin/homecore
+sudo install -m 0644 deploy/systemd/homecore-controller.service /etc/systemd/system/
+sudo systemctl daemon-reload
+
+# 4. Start. New migrations run now.
+sudo systemctl start homecore-controller
+```
+
+**Verify** (all must pass; otherwise roll back)
+
+```bash
+systemctl is-active homecore-controller                 # active
+curl -fsS http://127.0.0.1:8080/readyz                  # HTTP 200 (503 = schema behind the binary)
+homecore --version                                      # @VERSION@ (@COMMIT@)
+journalctl -u homecore-controller -n 30 --no-pager      # "database ready ... migrations_applied=N schema_version=@SCHEMA_VERSION@"
+```
+
+Compare `/etc/homecore/homecore.yaml` with `configs/homecore.example.yaml` of this package: new keys have
+defaults, but **unknown keys are rejected at startup** (a key removed in a newer release will stop the
+service; the journal names it).
+
+### Upgrade an Agent
+
+```bash
+set -euo pipefail
+sudo systemctl stop homecore-agent
+sudo cp -a /usr/local/bin/homecore /usr/local/bin/homecore.prev
+sudo install -m 0755 homecore /usr/local/bin/homecore
+sudo install -m 0644 deploy/systemd/homecore-agent.service /etc/systemd/system/
+sudo install -m 0644 deploy/polkit/50-homecore-agent.rules /etc/polkit-1/rules.d/
+sudo systemctl daemon-reload
+sudo systemctl start homecore-agent
+systemctl is-active homecore-agent
+homecore --version
+```
+
+The Agent keeps its `agent_id` (stored in its data dir), so the device binding survives upgrades.
+
+### Roll back
+
+**There is no schema downgrade, and an older binary does not refuse a newer database.** After a migration
+has run, putting the old binary back is not enough: restore the data backup taken before the upgrade.
+
+```bash
+sudo systemctl stop homecore-controller
+sudo install -m 0755 /usr/local/bin/homecore.prev /usr/local/bin/homecore
+sudo rm -rf /var/lib/homecore
+sudo mv /var/lib/homecore.bak-<timestamp> /var/lib/homecore
+sudo systemctl start homecore-controller
+```
+
+If the upgrade did not start (no migration ran, `migrations_applied=0`), restoring the binary alone is enough.
+
+---
+
+## Data and secrets
+
+| Path | Holds | Back up? |
+|---|---|---|
+| `/etc/homecore/homecore.yaml`, `/etc/homecore/agent.yaml` | configuration | yes |
+| `/var/lib/homecore/homecore.db` (+ `-wal`, `-shm`) | SQLite database | yes (stop the service, or copy all three files together) |
+| `/var/lib/homecore/master.key` | key that seals every secret in the database | **yes, and keep it with the database**: without it the sealed secrets (Cloudflare tokens, signing keys) cannot be read and the Controller will not replace them |
+| `/var/lib/homecore-agent/` | the Agent identity (`agent_id`) | yes |
+
+Never put secrets in logs, tickets or chat. The files above are `0600`/`0640` on purpose.
+
+## Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| Service fails at start with an `unknown field` / config error | `journalctl -u homecore-controller -n 50`; remove or rename the key it names, compare with `configs/homecore.example.yaml` |
+| `/readyz` returns 503 | Database schema is behind the binary; look for a failed `migration NNNN_...` line in the journal |
+| `exec format error` | Wrong architecture package; `uname -m` must print `@UNAME_M@` |
+| Agent never shows up / shutdown rejected | The Controller public key in `agent.trusted_controllers` is wrong or missing; re-run `homecore key show` on the Controller |
+| Cannot sign in | No account yet: run `homecore user add` (above); reset with `homecore user passwd` |
+
+## Uninstall
+
+```bash
+sudo systemctl disable --now homecore-controller homecore-agent 2>/dev/null || true
+sudo rm -f /etc/systemd/system/homecore-{controller,agent}.service /etc/polkit-1/rules.d/50-homecore-agent.rules /usr/local/bin/homecore{,.prev}
+sudo systemctl daemon-reload
+# Data and config are kept on purpose. To delete them too: /var/lib/homecore*, /etc/homecore
+```

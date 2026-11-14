@@ -50,6 +50,10 @@ ui-dev: ## Frontend dev server on :3000, proxying /api to the Controller on :808
 .PHONY: build-full
 build-full: ui-build build ## Build the UI, then the homecore binary with the UI embedded
 
+.PHONY: package
+package: ui-build ## Package Linux release archives (amd64 + arm64) into build/dist, same as CI
+	@for a in amd64 arm64; do scripts/package-backend.sh $$a $(VERSION) || exit 1; done
+
 .PHONY: devtools
 devtools: ## Build developer utilities (keygen, signed agent commands)
 	go build -o build/devtools ./cmd/devtools

@@ -5,6 +5,7 @@ that spans days uses its end date). Newest entries are listed first below.
 
 | Date | Entry | Summary |
 |------|-------|---------|
+| 2026-11-14 | [2026-11-14-build-release-pipeline.md](2026-11-14-build-release-pipeline.md) | GitHub Actions: frontend zip + Linux amd64/arm64 packages with install/upgrade README, release on tags |
 | 2026-11-14 | [2026-11-14-activity-header-layout.md](2026-11-14-activity-header-layout.md) | Make Activity header actions responsive without wrapping button labels |
 | 2026-11-14 | [2026-11-14-local-address-interfaces.md](2026-11-14-local-address-interfaces.md) | Show network interface names next to local IP addresses |
 | 2026-11-14 | [2026-11-14-disk-tooltip.md](2026-11-14-disk-tooltip.md) | Keep the disk path in a tooltip to prevent overflow |
