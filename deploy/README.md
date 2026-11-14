@@ -38,6 +38,13 @@ sudo -u homecore homecore key show --config /etc/homecore/homecore.yaml
 # The same public key is at GET /api/v1/system/controller-key (any signed-in user).
 ```
 
+# Windows Agent (shutdown/reboot implemented, not yet run on a real Windows host)
+# Run an ELEVATED console (Administrator) or a Task Scheduler task "Run with highest privileges".
+# There is no Windows Service wrapper yet. Set data_dir explicitly: the default is ./data relative to
+# the working directory (System32 when elevated).
+#   homecore.exe --mode agent --config C:\ProgramData\homecore\agent.yaml
+# Applications are closed by force on shutdown: unsaved data is lost.
+
 Notes
 - Distros with polkit < 0.106 (old Debian/Ubuntu) need an equivalent `.pkla` file instead of JS rules.
 - Keep the agent port closed to the Internet (firewall to the LAN / VPN subnet).

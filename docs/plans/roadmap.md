@@ -128,7 +128,8 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [ ] Backup/restore endpoint (`DB.Backup`) and restore procedure
 - [ ] CI pipeline: lint, test, race, `check-generated`, `cross`
 - [ ] Release pipeline (partial): GitHub Actions `build.yml` builds the frontend zip and Linux amd64/arm64 packages and publishes them on `v*` tags; other targets (linux/arm, macOS, Windows, Android) still open
-- [ ] Windows agent: power adapter + Windows Service
+- [x] Windows agent power adapter (`InitiateSystemShutdownExW`, run elevated; not yet run on a Windows host)
+- [ ] Windows Service wrapper for the Agent, and a Windows release package
 
 ## Backlog (known gaps from requirement docs)
 

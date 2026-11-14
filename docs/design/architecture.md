@@ -604,11 +604,11 @@ its app-private data dir to `mobile.Start`.
 
 ## 12. Platform adapters
 
-| Capability | Linux | macOS (dev) | Windows (later) | Android |
+| Capability | Linux | macOS (dev) | Windows | Android |
 |------------|-------|-------------|-----------------|---------|
-| Power control (agent) | `systemctl poweroff/reboot` via polkit | dry-run (log only) | `InitiateSystemShutdownExW` | n/a (controller only) |
+| Power control (agent) | `systemctl poweroff/reboot` via polkit | dry-run (log only) | `InitiateSystemShutdownExW` after enabling `SeShutdownPrivilege`; Agent runs elevated (REQ-AG-015) | n/a (controller only) |
 | System metrics | gopsutil | gopsutil | gopsutil | Kotlin callback |
-| Service manager | systemd unit | `go run` / launchd | Windows Service | Foreground service |
+| Service manager | systemd unit | `go run` / launchd | Windows Service (later) | Foreground service |
 | Master key | file / env | file / env | DPAPI (later) | Android Keystore via host |
 
 Build tags: note that `GOOS=android` also satisfies the `linux` constraint, so Linux-only adapters
