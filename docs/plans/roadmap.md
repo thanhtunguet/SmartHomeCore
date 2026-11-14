@@ -83,7 +83,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [x] "Wake many" (brief §3.4): **client-side fan-out**, no batch endpoint (ADR-014, REQ-CMD-012)
 - [x] Spec conformance test helper (every response of the implemented operations validated against `api/openapi.yaml`)
 - [x] Audit entries for device create/update/delete/agent removal/wake (REQ-DEV-010)
-- [ ] Follow-up: regenerate the frontend's generated types (spec edits, see [http-api.md](../requirements/http-api.md)); needs a frontend change
+- [x] Follow-up: frontend generated types regenerated after the Phase 2 spec edits (`npm run gen:api`; `check:api` and 110 tests pass)
 
 ## Phase 3 — Secure Agent
 
