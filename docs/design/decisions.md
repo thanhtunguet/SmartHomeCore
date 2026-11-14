@@ -446,3 +446,72 @@ is disabled; a `GET` that powers a machine off is also exposed to link prefetche
 that log URLs (the token is in a header, not the URL, which is why it is not a query parameter).
 Disabling an account still needs SQL until `homecore user disable` exists (backlog). Not decided:
 a revocation list, per-token labels in a table, restricting a token to chosen devices.
+
+---
+
+## ADR-018 — Service account keys: server-generated Ed25519 keys, scoped, individually revocable and self-rotating
+
+**Context.** The legacy endpoints (ADR-017) and AI agents (an MCP server calling the Controller) need
+credentials that outlive a login session, that a user can create with a chosen lifetime, and that
+can be cut off one by one. The HS256 legacy tokens cannot: they have no row, so revoking one means
+disabling its account or replacing the signing key for everybody. An agent must also be able to renew
+its own credential without a human.
+
+**Decision.**
+- **A key is a row in `service_account_keys`** (migration `0007`): owner (`users.id`), name, scope,
+  TTL, `expires_at`, and the key material. Created by `POST /service-account-keys` with a **session**
+  token; `ttl_seconds` defaults to one year (60 s to 20 years). Actions made with a key are attributed
+  to the owning user (ADR-011: no roles, so no separate "service account" principal).
+- **The Controller generates an Ed25519 key pair per key and keeps the private key in the database,
+  sealed** with the master key (AES-GCM, AAD `service_account_keys.private_key:<id>`, REQ-SEC-006). It
+  is independent of the JWT signing key, the master key and the Controller's agent-signing key.
+- **The credential is a JWT** (`alg: EdDSA`, `kid` = key id, claims `sub`, `iat`, `exp`, `jti`, `scp`)
+  signed with that private key, sent as `Authorization: Bearer <key>`. It is shown once, in the
+  response that created it, and never stored. Because Ed25519 signatures are deterministic and the
+  claims are a function of the row, the Controller can rebuild the very same credential from the row
+  when it must (see rotation). `auth.Router` sends EdDSA tokens to `servicekey.Service` and HS256
+  tokens to the session authenticator.
+- **Verification** (every request): strict header (`alg` EdDSA, `typ` JWT or absent, `kid` required,
+  nothing else), `kid` lookup, signature with the stored public key, then the **row** decides: not
+  revoked, not past `expires_at`, not past its rotation grace; claims `sub`/`scp`/`jti` equal the
+  row; the owner exists and is not disabled. Revoking, disabling the owner or deleting it therefore
+  works at once. `last_used_at` is refreshed at most once a minute.
+- **Scopes.** `legacy` (the three legacy operations) and `mcp` (device control and read-only
+  monitoring). Which operations accept a scope is written in the spec: the operation-level extension
+  `x-token-scopes: [...]` (the `legacy` tag still implies the scope `legacy`). `middleware.Authorize`
+  answers `403` when a key's scope is not listed, so a new operation is **session-only until someone
+  lists it**. The `mcp` allowlist is: `getCurrentUser`, `listDevices`, `getDevice`, `getDeviceHistory`,
+  `probeDevice`, `wakeDevice`, `shutdownDevice`, `listCommands`, `getCommand`, `getSystemInfo`,
+  `getSystemMetrics`, `listActivity`, the legacy operations, and rotation. It excludes device and DDNS
+  configuration, the Controller key, key management and logout. Create, list and revoke carry no
+  `x-token-scopes`: a key can never mint or revoke keys.
+- **Rotation: `POST /auth/service-key/rotate`**, authenticated by the key being replaced. The
+  Controller checks it is valid (not revoked, not expired), creates a new key (new key pair) with the
+  same owner, name and scope and the old key's TTL (or the request's `ttl_seconds`), and returns it.
+  The old key is **superseded, not revoked**: it works for `RotationGrace` (1 minute) and then dies.
+  A repeat of the call with the old key inside that window returns the **same** successor (rebuilt
+  from its sealed private key) instead of creating a second one, so a client that lost the response
+  cannot be locked out; after the window the old key is `401`, and if the successor was meanwhile
+  revoked, rotated again or is gone, the answer is `409`. The path is under `/auth/`, so it gets the
+  per-IP limit of the login endpoints. Only a key can call it (a session token gets `403`).
+- **Audit:** `service_key.create`, `service_key.revoke`, `service_key.rotate` (details: ids, name,
+  scope, expiry, `replayed`, `via_key_id`; never the credential), written in the same transaction as
+  the change. Device audit entries made with a key carry `service_key_id`.
+- **Retention:** `service_account_keys` is a `retention` target: rows that expired, were revoked or
+  were superseded longer than `retention_days` ago are deleted.
+
+**Alternatives considered.** *Opaque random secrets stored hashed* (like refresh tokens): simpler
+and the server would keep nothing derivable, but the brief for this feature asked for server-held
+private keys, and the derivable credential is what makes the rotation retry idempotent without a
+second sealed column. *Keys held by the client that sign short-lived assertions*: no bearer secret
+on the wire, but the legacy apps cannot sign anything and an MCP client would need custom code.
+
+**Consequences.** The credential is a **bearer secret**: whoever has it acts as the owner within its
+scope until it expires or is revoked; there is no proof of possession and no per-device or per-IP
+restriction. Anyone who has the database and the master key can mint valid credentials for any key
+row, exactly as they could already forge session tokens with the JWT key. During the grace window a
+stolen old key can fetch the new key (the price of retry safety; the window is a constant). The
+legacy HS256 tokens of ADR-017 remain and are still revoked only through their account; new
+integrations should use keys. The MCP server itself is **not part of this repository**: the `mcp`
+scope is the contract it authenticates against. Not decided: per-key device restrictions, a
+user-facing "rotate this key" by id, a cap on keys per user, UI screens (frontend submodule).

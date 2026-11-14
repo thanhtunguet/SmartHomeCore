@@ -3,10 +3,10 @@
 | | |
 |---|---|
 | Engine | SQLite 3 (embedded) via `modernc.org/sqlite` (pure Go, [ADR-004](decisions.md#adr-004--sqlite-driver-moderncorgsqlite-everywhere)) |
-| Schema version | `6` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`, `0003_users_no_roles.sql`, `0004_refresh_grace.sql`, `0005_agent_status.sql`, `0006_ddns_state.sql`) |
+| Schema version | `7` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`, `0003_users_no_roles.sql`, `0004_refresh_grace.sql`, `0005_agent_status.sql`, `0006_ddns_state.sql`, `0007_service_account_keys.sql`) |
 | Owner role | Controller only. The Agent has no database |
 | Requirements | [storage-and-secrets.md](../requirements/storage-and-secrets.md) |
-| Last reviewed | 2026-11-14 (Phase 4: migration 0006, DDNS observed state and record uniqueness; earlier: Phase 3 migration 0005) |
+| Last reviewed | 2026-11-14 (service account keys: migration 0007; Phase 4: migration 0006, DDNS observed state and record uniqueness; earlier: Phase 3 migration 0005) |
 
 The DDL in `internal/storage/migrations/` is authoritative. This document explains it and must be
 updated in the same change as any new migration.
@@ -47,6 +47,7 @@ updated in the same change as any new migration.
 ```mermaid
 erDiagram
     users ||--o{ refresh_tokens : "has"
+    users ||--o{ service_account_keys : "owns"
     users |o--o{ commands : "requested_by"
     devices ||--o| agent_bindings : "bound to agent"
     devices ||--o{ device_status_history : "transitions"
@@ -66,6 +67,7 @@ Mapping from the brief's table list (§3.7):
 | `device_status_history` | `device_status_history` | Transitions only |
 | `users` | `users` | |
 | `refresh_tokens` | `refresh_tokens` | Hashed, rotating, family-based reuse detection |
+| — | `service_account_keys` | Added (ADR-018): long-lived scoped credentials for legacy clients and AI agents |
 | `agent_credentials` | `agent_bindings` + `controller_keys` | Ed25519: the secret belongs to the Controller |
 | `command_history` | `commands` | Lifecycle state machine, not just history |
 | `ddns_configs` | `ddns_configs` | |
@@ -109,6 +111,31 @@ within the 10 s grace window, where the already issued successor pair is returne
 Indexes: `refresh_tokens_user (user_id)`, `refresh_tokens_family (family_id)`.
 
 Revoking a family sets `revoked_at` on every row of it. Rows are deleted by `auth.Service.Maintain`: expired or revoked more than 24 h ago, or rotated (used) more than 7 days ago.
+
+### service_account_keys
+
+Service account keys (ADR-018, migration `0007`), written by `internal/servicekey`. One row per key; the
+credential handed to the client is a JWT signed with the row's private key, derivable from the row and
+never stored. The private key is a sealed BLOB (REQ-SEC-006).
+
+| Column | Type | Null | Constraint / note |
+|--------|------|------|-------------------|
+| `id` | TEXT | no | PK, UUIDv7; also the credential's `kid` and `jti` |
+| `user_id` | TEXT | no | FK `users(id)` `ON DELETE CASCADE`: deleting the owner deletes the keys |
+| `name` | TEXT | no | 1..64 characters |
+| `scope` | TEXT | no | `legacy` \| `mcp`; matched against `x-token-scopes` |
+| `public_key` | BLOB | no | 32 bytes Ed25519; verifies the credential |
+| `private_key_sealed` | BLOB | no | the 32-byte seed, AES-GCM with the master key, AAD `service_account_keys.private_key:<id>` |
+| `ttl_seconds` | INTEGER | no | `> 0`; lifetime chosen at creation, reused by a rotation |
+| `created_at` | INTEGER | no | |
+| `expires_at` | INTEGER | no | immutable end of life |
+| `revoked_at` | INTEGER | yes | set by `DELETE /service-account-keys/{id}` |
+| `superseded_at` | INTEGER | yes | set when a rotation replaced the key; it works for 1 more minute (`servicekey.RotationGrace`) |
+| `rotated_to` | TEXT | yes | id of the successor; no FK, because pruning may delete either row |
+| `last_used_at` | INTEGER | yes | refreshed at most once a minute |
+
+A key authenticates while `revoked_at IS NULL`, `now < expires_at` and (`superseded_at IS NULL` or
+`now < superseded_at + 1 min`). Index: `service_account_keys_user (user_id, created_at)`.
 
 ### devices
 
@@ -301,6 +328,7 @@ Created by the migration runner (not by a migration file).
 | `commands` (terminal) | per wake/shutdown | terminal rows (`completed`, `failed`, `timed_out`) pruned after `retention_days`, by `updated_at`; active commands are never pruned |
 | `ddns_sync_history` | per sync attempt | pruned after `retention_days` (`ddns.PruneSyncHistory`) |
 | `refresh_tokens` | per login/refresh | implemented by `auth.Service.Maintain` (every minute): expired or revoked > 24 h, rotated > 7 days; sealed successor copies wiped after 10 s |
+| `service_account_keys` | per key and per rotation | rows that expired, were revoked or were superseded more than `retention_days` ago are pruned by `internal/retention` (`servicekey.Service.Prune`) |
 | `audit_log` | per privileged action | kept (small); export/prune is a future admin feature |
 
 **Retention job** (`internal/retention`, implemented in Phase 2): `Run(ctx)` runs once at start and

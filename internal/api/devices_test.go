@@ -33,6 +33,7 @@ import (
 	"github.com/thanhtunguet/homecore/internal/monitoring"
 	"github.com/thanhtunguet/homecore/internal/platform"
 	"github.com/thanhtunguet/homecore/internal/secrets"
+	"github.com/thanhtunguet/homecore/internal/servicekey"
 	"github.com/thanhtunguet/homecore/internal/storage"
 	"github.com/thanhtunguet/homecore/internal/system"
 )
@@ -52,6 +53,7 @@ type devEnv struct {
 	repo   *devices.SQLiteRepository
 	token  string
 	userID string
+	keys   *servicekey.Service // service account keys (ADR-018), wired into the router
 
 	// Phase 4: DDNS against a fake Cloudflare and a scripted public-IP discoverer, and metrics.
 	cf      *ddnstest.Cloudflare
@@ -137,7 +139,11 @@ func newDevEnvOpts(t *testing.T, mutate func(*config.Controller), realProbe bool
 		t.Fatal(err)
 	}
 
-	e := &devEnv{t: t, db: db, spec: newSpecChecker(t), token: pair.AccessToken, userID: user.ID, up: map[int]bool{}, logs: logs}
+	keySvc, err := servicekey.New(servicekey.Config{DB: db, Sealer: sealer, Audit: writer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &devEnv{t: t, keys: keySvc, db: db, spec: newSpecChecker(t), token: pair.AccessToken, userID: user.ID, up: map[int]bool{}, logs: logs}
 	e.cf = ddnstest.New(cfTestToken)
 	t.Cleanup(e.cf.Close)
 	e.cf.Zones = []ddnstest.Zone{{ID: "zone1", Name: "example.com"}, {ID: "zone2", Name: "Another.org"}}
@@ -183,7 +189,7 @@ func newDevEnvOpts(t *testing.T, mutate func(*config.Controller), realProbe bool
 	e.mon.SetObserver(e.engine)
 
 	srv, err := New(Deps{
-		Config: cfg, Log: log, DB: db, Auth: authSvc,
+		Config: cfg, Log: log, DB: db, Auth: authSvc, ServiceKeys: keySvc,
 		Devices: devSvc, Commands: e.engine, Monitor: e.mon, Audit: writer,
 		ControllerKey: key, Activity: activity.NewService(db), DDNS: e.ddnsSvc, Metrics: e.metrics,
 	})

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | [`BRIEF.md`](../../BRIEF.md) (Technical Brief v0.1, Vietnamese) |
-| Last reviewed | 2026-11-14 (Phase 4) |
+| Last reviewed | 2026-11-14 (service account keys) |
 | Owner | Project maintainers |
 
 This document turns the brief into the project's requirements baseline. It records which brief
@@ -59,6 +59,7 @@ One build supports both roles; configuration selects `controller`, `agent` or `b
 | JWT authentication | **Implemented** (Phase 1b): argon2id, HS256 access tokens, rotating refresh tokens with reuse detection and grace window, `homecore user` CLI; no roles (ADR-011) | [authentication.md](authentication.md) |
 | Cloudflare DDNS | **Implemented** (Phase 4): public-IP quorum, Cloudflare client, sealed tokens, scheduled and manual sync with backoff, zone/record lookups, audit; not yet run against the real Cloudflare | [ddns.md](ddns.md) |
 | Legacy single-device API (added after the brief, not in it) | **Implemented**: `GET /api/turn-on\|turn-off\|is-online?device=`, long-lived scoped tokens (`homecore token create`), URLs in the device sheet (ADR-017) | [http-api.md](http-api.md) REQ-API-026..028, [authentication.md](authentication.md) REQ-AUTH-019/020 |
+| Service account keys (added after the brief, not in it) | **Implemented**: server-generated Ed25519 keys (private key sealed in the database), TTL default 1 year, scopes `legacy`/`mcp`, create/list/revoke by a user, self-rotation by the key with a 1-minute grace and idempotent retry, audit (ADR-018) | [authentication.md](authentication.md) REQ-AUTH-021..027, [http-api.md](http-api.md) REQ-API-029..031, [storage-and-secrets.md](storage-and-secrets.md) REQ-SEC-006 |
 | Swagger UI at `/api/docs` | **Implemented** | [http-api.md](http-api.md) |
 | Static file serving | **Implemented** (UI embedded via `make build-full`; placeholder otherwise) | [http-api.md](http-api.md), [web-ui.md](web-ui.md) |
 
@@ -243,7 +244,7 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 | 6.5 | Never expose the Agent to the Internet; prefer VPN | Documented (`deploy/README.md`, config comments) | REQ-AG-012 |
 | 6.6 | JWT secret ≠ Agent secret | Implemented (JWT key, master key and the Controller Ed25519 key are three distinct secrets; the Controller key is generated and sealed in Phase 3) | REQ-AUTH-004, REQ-SEC-005, REQ-SHD-001 |
 | 6.7 | Shutdown requires admin and writes audit log | **Changed:** no roles (ADR-011), any authenticated user. `audit_log` writer exists (`internal/audit`, used by login/logout/account changes and, since Phase 2, device create/update/delete/agent removal/wake); since Phase 3 `shutdownDevice` writes `device.shutdown` (result ok/failed) and key creation writes `controller_key.create` | REQ-API-008, REQ-AUTH-014, REQ-DEV-010, REQ-SHD-009 |
-| 6.8 | Private keys and Cloudflare tokens protected at rest | Implemented (sealer used for the JWT key, refresh-grace copies, the Controller key since Phase 3 and the DDNS tokens since Phase 4) | REQ-SEC-002, REQ-SEC-003, REQ-AUTH-004, REQ-SHD-001, REQ-DDNS-004 |
+| 6.8 | Private keys and Cloudflare tokens protected at rest | Implemented (sealer used for the JWT key, refresh-grace copies, the Controller key since Phase 3, the DDNS tokens since Phase 4 and the service account private keys) | REQ-SEC-002, REQ-SEC-003, REQ-SEC-006, REQ-AUTH-004, REQ-SHD-001, REQ-DDNS-004 |
 | 6.9 | Acknowledge before executing shutdown | Implemented | REQ-AG-009 |
 | 6.10 | Agent only runs predefined commands | Implemented | REQ-AG-005 |
 | 6.11 | Agent runs with least privilege | Implemented (polkit + hardened systemd unit; host validation pending) | REQ-AG-011 |

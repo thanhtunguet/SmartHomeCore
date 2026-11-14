@@ -11,6 +11,13 @@ info:
       that predate multi-device support. They take the device in a `device` query parameter and also
       accept the long-lived, legacy-scoped tokens of `homecore token create`; such a token is refused
       (`403`) on every other operation (ADR-017).
+    * **Service account keys** (ADR-018) are long-lived, revocable credentials for the legacy endpoints
+      and for AI agents (MCP servers). A user creates one with `POST /service-account-keys` (session
+      token required); the response carries the key once, to be sent as `Authorization: Bearer <key>`.
+      A key has a **scope**: `legacy` (the three legacy operations) or `mcp` (device control and
+      read-only monitoring). Operations list the scopes they accept in `x-token-scopes`; a scoped
+      key is refused (`403`) everywhere else, and key management is never open to a key. A key
+      replaces itself with `POST /auth/service-key/rotate`.
     * Wake/shutdown return `202 Accepted` with a command; poll `GET /api/v1/commands/{id}` for the outcome.
     * Wake/shutdown are **idempotent** and **fail fast**: repeating one has the effect of sending it
       once and is never an error (see each operation). At most **one wake/shutdown request per device
@@ -43,6 +50,8 @@ tags:
   - name: system
   - name: activity
   - name: ddns
+  - name: service-keys
+    description: Service account keys for legacy clients and AI agents (ADR-018).
   - name: legacy
     description: Three GET endpoints for apps written before multi-device support (ADR-017).
 
@@ -137,6 +146,7 @@ paths:
     get:
       tags: [auth]
       operationId: getCurrentUser
+      x-token-scopes: [mcp]
       summary: Current user
       responses:
         "200":
@@ -145,11 +155,120 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/User" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/auth/service-key/rotate:
+    post:
+      tags: [auth, service-keys]
+      operationId: rotateServiceAccountKey
+      x-token-scopes: [legacy, mcp]
+      summary: Rotate the service account key used for this request
+      description: |
+        Authenticate with the service account key to replace (`Authorization: Bearer <key>`). The
+        Controller checks that the key is valid (not revoked, not expired), creates a new key of the
+        same owner, name and scope with a new key pair, and answers with it. A session token is
+        refused (`403`): only a key can rotate itself; users manage keys with the
+        `/service-account-keys` operations.
+
+        The old key is **not** cut off at once: it keeps working for `previous_key_valid_until`
+        (a minute) so a client that lost this response can retry. A retry with the old key inside
+        that window returns the same new key (`200`, no second key is created); after it the old key
+        is `401`. The new key's lifetime is the old key's `ttl_seconds` unless the request sets one.
+        Store the new key before using it: it is shown only in this response and at creation.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RotateServiceAccountKeyRequest" }
+      responses:
+        "200":
+          description: The new key
+          headers:
+            Cache-Control: { schema: { type: string, example: no-store } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceAccountKeyCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: |
+            The key was already rotated and its successor is no longer usable (revoked or expired);
+            create a new key.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/service-account-keys:
+    get:
+      tags: [service-keys]
+      operationId: listServiceAccountKeys
+      summary: List the caller's service account keys
+      description: |
+        Metadata only, newest first: the key material is never returned again. Keys of other users
+        are not listed. Session token required.
+      responses:
+        "200":
+          description: The caller's keys
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ServiceAccountKey" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [service-keys]
+      operationId: createServiceAccountKey
+      summary: Create a service account key
+      description: |
+        The Controller generates an Ed25519 key pair, keeps the private key sealed in its database
+        and returns the key once in `key`. Send it as `Authorization: Bearer <key>`. Actions made
+        with it are attributed to the caller. `ttl_seconds` defaults to one year (at most 20 years).
+        Session token required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateServiceAccountKeyRequest" }
+      responses:
+        "201":
+          description: The new key; `key` is shown only here
+          headers:
+            Cache-Control: { schema: { type: string, example: no-store } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceAccountKeyCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/service-account-keys/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ServiceAccountKeyId"
+    delete:
+      tags: [service-keys]
+      operationId: revokeServiceAccountKey
+      summary: Revoke a service account key
+      description: |
+        Takes effect at once. Idempotent: revoking a revoked key is `204`. A key that does not exist or
+        belongs to another user is `404`. Session token required.
+      responses:
+        "204": { description: Revoked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/v1/devices:
     get:
       tags: [devices]
       operationId: listDevices
+      x-token-scopes: [mcp]
       summary: List devices
       parameters:
         - $ref: "#/components/parameters/Limit"
@@ -162,6 +281,7 @@ paths:
               schema: { $ref: "#/components/schemas/DeviceList" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
     post:
       tags: [devices]
       operationId: createDevice
@@ -187,6 +307,7 @@ paths:
     get:
       tags: [devices]
       operationId: getDevice
+      x-token-scopes: [mcp]
       summary: Get a device
       responses:
         "200":
@@ -195,6 +316,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Device" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
     patch:
       tags: [devices]
@@ -244,6 +366,7 @@ paths:
     post:
       tags: [devices, commands]
       operationId: wakeDevice
+      x-token-scopes: [mcp]
       summary: Send Wake-on-LAN (asynchronous, idempotent)
       description: |
         Returns a `wake` command (`202`). Idempotent: if a wake command is already active for this
@@ -265,6 +388,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Command" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
@@ -275,6 +399,7 @@ paths:
     post:
       tags: [devices, commands]
       operationId: shutdownDevice
+      x-token-scopes: [mcp]
       summary: Request a signed shutdown via the device's agent (asynchronous, idempotent)
       description: |
         Returns a `shutdown` command (`202`). Idempotent: if a shutdown command is already active for
@@ -298,6 +423,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Command" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
@@ -308,6 +434,7 @@ paths:
     post:
       tags: [devices]
       operationId: probeDevice
+      x-token-scopes: [mcp]
       summary: Run a TCP probe now
       responses:
         "200":
@@ -316,6 +443,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ProbeResult" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/v1/devices/{id}/history:
@@ -324,6 +452,7 @@ paths:
     get:
       tags: [devices]
       operationId: getDeviceHistory
+      x-token-scopes: [mcp]
       summary: Status transitions of a device
       parameters:
         - $ref: "#/components/parameters/Limit"
@@ -336,12 +465,14 @@ paths:
               schema: { $ref: "#/components/schemas/StatusHistory" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/v1/commands:
     get:
       tags: [commands]
       operationId: listCommands
+      x-token-scopes: [mcp]
       summary: Command history
       parameters:
         - $ref: "#/components/parameters/Limit"
@@ -360,11 +491,13 @@ paths:
               schema: { $ref: "#/components/schemas/CommandList" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/v1/commands/{id}:
     get:
       tags: [commands]
       operationId: getCommand
+      x-token-scopes: [mcp]
       summary: Get a command
       parameters:
         - name: id
@@ -378,12 +511,14 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Command" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/v1/system/metrics:
     get:
       tags: [system]
       operationId: getSystemMetrics
+      x-token-scopes: [mcp]
       summary: Metrics of the host running the Controller
       responses:
         "200":
@@ -392,11 +527,13 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SystemMetrics" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/v1/system/info:
     get:
       tags: [system]
       operationId: getSystemInfo
+      x-token-scopes: [mcp]
       summary: Read-only Controller information and effective defaults
       description: Never contains secrets, keys or file paths.
       responses:
@@ -406,6 +543,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SystemInfo" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/v1/system/controller-key:
     get:
@@ -429,6 +567,7 @@ paths:
     get:
       tags: [activity]
       operationId: listActivity
+      x-token-scopes: [mcp]
       summary: Activity feed (who did what), newest first
       description: |
         Read-only feed built from the Controller's audit log: sign-ins, device changes, wake and
@@ -456,6 +595,7 @@ paths:
               schema: { $ref: "#/components/schemas/ActivityList" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/v1/ddns:
     get:
@@ -598,6 +738,7 @@ paths:
     get:
       tags: [legacy, devices]
       operationId: legacyTurnOn
+      x-token-scopes: [legacy, mcp]
       summary: "Legacy: turn the device on (Wake-on-LAN)"
       description: |
         For old apps. Same as `POST /api/v1/devices/{id}/wake`, addressed by the `device` query
@@ -623,6 +764,7 @@ paths:
     get:
       tags: [legacy, devices]
       operationId: legacyTurnOff
+      x-token-scopes: [legacy, mcp]
       summary: "Legacy: turn the device off (signed shutdown via its agent)"
       description: |
         For old apps. Same as `POST /api/v1/devices/{id}/shutdown`, addressed by the `device` query
@@ -647,6 +789,7 @@ paths:
     get:
       tags: [legacy, devices]
       operationId: legacyIsOnline
+      x-token-scopes: [legacy, mcp]
       summary: "Legacy: is the device online? (plain text true or false)"
       description: |
         For old apps. Answers `200` with the plain text `true` when the Controller last observed the
@@ -674,6 +817,11 @@ components:
 
   parameters:
     DeviceId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ServiceAccountKeyId:
       name: id
       in: path
       required: true
@@ -712,8 +860,9 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
     Forbidden:
       description: |
-        The token is valid but not accepted here (code `forbidden`): a legacy-scoped token used
-        outside the `legacy` operations.
+        The token is valid but not accepted here (code `forbidden`): a legacy-scoped token or a
+        service account key used outside the operations that list its scope in `x-token-scopes`, or a
+        key used on an operation that needs a session token.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -785,6 +934,80 @@ components:
       properties:
         id: { type: string, format: uuid }
         username: { type: string }
+
+    ServiceAccountKeyScope:
+      type: string
+      description: |
+        `legacy`: only the three legacy operations (and rotating itself).
+        `mcp`: device control and read-only monitoring for AI agents (the operations that list `mcp`
+        in `x-token-scopes`), never configuration, DDNS or key management.
+      enum: [legacy, mcp]
+
+    ServiceAccountKey:
+      type: object
+      required: [id, name, scope, status, ttl_seconds, created_at, expires_at]
+      properties:
+        id: { type: string, format: uuid, description: Also the `kid` of the key's JWT header. }
+        name: { type: string, minLength: 1, maxLength: 64 }
+        scope: { $ref: "#/components/schemas/ServiceAccountKeyScope" }
+        status:
+          type: string
+          description: |
+            `active`, `rotated` (replaced by a rotation; dead once the grace window is over),
+            `expired` or `revoked`.
+          enum: [active, rotated, expired, revoked]
+        ttl_seconds: { type: integer, description: Lifetime chosen at creation; a rotation reuses it. }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        last_used_at:
+          type: string
+          format: date-time
+          description: Last authenticated request, accurate to about a minute. Absent if never used.
+        rotated_to:
+          type: string
+          format: uuid
+          description: The key that replaced this one. Absent unless rotated.
+
+    ServiceAccountKeyCreated:
+      description: A key together with its secret. The secret is returned only by the operation that made the key.
+      allOf:
+        - $ref: "#/components/schemas/ServiceAccountKey"
+        - type: object
+          required: [key]
+          properties:
+            key:
+              type: string
+              description: "The credential (a JWT signed by the key's private key). Send it as `Authorization: Bearer <key>`. Treat it as a password."
+            previous_key_id:
+              type: string
+              format: uuid
+              description: Rotation only; the key that was replaced.
+            previous_key_valid_until:
+              type: string
+              format: date-time
+              description: Rotation only; when the replaced key stops working.
+
+    CreateServiceAccountKeyRequest:
+      type: object
+      required: [name, scope]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64, description: "What the key is for (for example `claude mcp`)." }
+        scope: { $ref: "#/components/schemas/ServiceAccountKeyScope" }
+        ttl_seconds:
+          type: integer
+          minimum: 60
+          maximum: 630720000
+          default: 31536000
+          description: Lifetime in seconds. Default one year, at most 20 years.
+
+    RotateServiceAccountKeyRequest:
+      type: object
+      properties:
+        ttl_seconds:
+          type: integer
+          minimum: 60
+          maximum: 630720000
+          description: Lifetime of the new key in seconds. Default is the old key's `ttl_seconds`.
 
     LoginRequest:
       type: object

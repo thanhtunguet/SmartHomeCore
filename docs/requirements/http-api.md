@@ -5,7 +5,7 @@
 | Brief | §3.1, §4, §6 (public API zone) |
 | Code | `internal/api` (`server.go`, `middleware/`, `handlers/`, `gen/`), `api/openapi.yaml`, `web/`; authentication: [authentication.md](authentication.md) |
 | Design | [architecture §6.1, §9, §10](../design/architecture.md), [ADR-006](../design/decisions.md#adr-006--spec-first-rest-api), [ADR-008](../design/decisions.md#adr-008--offline-swagger-ui) |
-| Last updated | 2026-11-14 (legacy device endpoints; local interface names; Phase 4: DDNS endpoints, Cloudflare lookups, system metrics; earlier: Phase 3 shutdown, controller key, activity feed, agent status) |
+| Last updated | 2026-11-14 (service account keys; legacy device endpoints; local interface names; Phase 4: DDNS endpoints, Cloudflare lookups, system metrics; earlier: Phase 3 shutdown, controller key, activity feed, agent status) |
 | Status | **Implemented**: foundation, authentication, devices, commands (wake and shutdown), controller key, activity feed, DDNS (incl. Cloudflare lookups) and system metrics. No documented operation returns `501` any more |
 
 ## Functional requirements
@@ -38,6 +38,9 @@
 | REQ-API-026 | **Legacy endpoints** (ADR-017) for apps that predate multi-device support: `GET /api/turn-on`, `GET /api/turn-off`, `GET /api/is-online`, each with the required query parameter `device` (a UUID is an id, anything else a name, compared case-insensitively; whitespace-only is `404`; missing is `400`). They need the normal `Authorization: Bearer` header (session token or a legacy token, REQ-AUTH-019); anonymous is `401`. `turn-on`/`turn-off` do what `POST /devices/{id}/wake`/`shutdown` do (idempotent, fail fast, `409` for no MAC / no agent binding, audited as `device.wake`/`device.shutdown` with the acting user and `via: legacy`) and answer `200` with the text `true`; they never wait for the machine. `is-online` answers `200` `true` when the stored status is `online`, else `false` (`offline`, `unknown`); unknown device is `404`. Text responses are `text/plain` with `Cache-Control: no-store`; errors use the JSON envelope. | Implemented | `TestLegacyTurnOnByNameAndByID`, `TestLegacyIsOnlineFollowsTheMonitor`, `TestLegacyErrorsUseTheEnvelope`, `TestLegacyTurnOffReachesTheAgent`, `TestPolicyMarksTheLegacyOperationsOnly`; `devices.TestResolveByIDOrName`; smoke test 2026-11-14 with the real binary |
 | REQ-API-027 | The legacy `turn-on`/`turn-off` share the one-request-per-device-per-second slot of `/api/v1` wake/shutdown (REQ-API-018), however the device is spelled (name or id): the second request is `429 rate_limited` with `Retry-After: 1`. `is-online` is not throttled. A client that sends turn-on and turn-off back to back therefore gets `429` on the second. | Implemented | `TestLegacyThrottleIsSharedWithV1` |
 | REQ-API-028 | A legacy-scoped token (`scp: legacy`) is accepted **only** on operations tagged `legacy` in the spec; on every other protected operation it gets `403 forbidden` even though the signature is valid. The policy is derived from the spec (`middleware.Requirement.Legacy`), so a new operation is closed to these tokens unless someone tags it. The `403` is not declared on the `/api/v1` operations (like the fail-closed policy `403`). | Implemented | `TestLegacyTokenIsScopedToTheLegacyEndpoints`, `TestPolicyMarksTheLegacyOperationsOnly` |
+| REQ-API-029 | **Token scopes in the spec.** An operation lists the restricted credentials it accepts in the operation-level extension `x-token-scopes: [legacy, mcp]` (the `legacy` tag still implies `legacy`, REQ-API-028). `middleware.Authorize` derives this into `Requirement.Scopes`; a credential with a scope that is not listed gets `403 forbidden`, a session token is always accepted once authenticated, and a malformed extension aborts startup. An operation without the extension is session-only, so a new operation is closed to keys until it is listed. | Implemented | `TestPolicyMarksTheLegacyOperationsOnly`, `TestPolicyMCPScopeIsAnAllowlist`, `TestPolicyKeyManagementIsSessionOnly`, `TestScopesExtensionIsValidated`, `TestServiceKeyScopesAreEnforced` |
+| REQ-API-030 | **Service account keys** (ADR-018): `POST /service-account-keys` (`201`), `GET /service-account-keys`, `DELETE /service-account-keys/{id}` (`204`), all session-only, and `POST /auth/service-key/rotate` (`200`, accepts `legacy` and `mcp` keys only, REQ-AUTH-024/025). Responses with a key are `Cache-Control: no-store`. Behaviour: [authentication.md](authentication.md) REQ-AUTH-021..027. | Implemented | `internal/api/servicekeys_test.go` (every response validated against the spec) |
+| REQ-API-031 | The rotate endpoint is under `/api/v1/auth/`, so the per-IP limit of the credential endpoints applies (10/min, burst 5, `429 rate_limited`). | Implemented | `TestServiceKeyRotationIsRateLimitedLikeLogin` |
 | REQ-API-022 | Accounts are managed by the `homecore user add\|passwd` command (Phase 1b), not by the API or the UI; there is no first-run bootstrap account. | Implemented (`homecore user add\|passwd\|list`, REQ-AUTH-015..018) | `TestUserAddPasswdListEndToEnd` |
 | REQ-API-024 | `GET /api/v1/system/controller-key` (`getControllerKey`, any authenticated user) returns exactly `key_id`, `algorithm` (`ed25519`) and the base64 `public_key` of the active Controller key (REQ-SHD-001/002); never the private key. `401` without a token. | Implemented | `TestControllerKeyEndpoint`, `TestAgentTrustingTheAPIKeyAcceptsTheDispatcher` |
 
@@ -62,6 +65,7 @@ The full contract (brief §4 plus additions) is in `api/openapi.yaml`.
 | `DELETE /api/v1/devices/{id}/agent` | Implemented (Phase 2) |
 | `GET/POST /api/v1/ddns`, `PATCH/DELETE /api/v1/ddns/{id}`, `POST /api/v1/ddns/{id}/sync` | Implemented (Phase 4) |
 | `POST /api/v1/ddns/cloudflare/zones`, `POST /api/v1/ddns/cloudflare/zones/{zone_id}/records` | Implemented (Phase 4) |
+| `GET/POST /api/v1/service-account-keys`, `DELETE /api/v1/service-account-keys/{id}`, `POST /api/v1/auth/service-key/rotate` | Implemented (ADR-018) |
 
 ## Known gaps
 
@@ -118,3 +122,15 @@ the pre-Phase-4 spec work); `make generate` leaves `internal/api/gen` byte-ident
 (`git diff --exit-code internal/api/gen` clean). Two deliberate consequences of the existing spec:
 a duplicate record or a record that does not match is `400` (the spec has no `409` for DDNS), and a
 failed sync is a normal `200` `DdnsSyncResult` with `result: failed`.
+
+## Spec change: service account keys
+
+| Change | Why |
+|--------|-----|
+| New operations `createServiceAccountKey`, `listServiceAccountKeys`, `revokeServiceAccountKey`, `rotateServiceAccountKey`, a tag `service-keys`, schemas `ServiceAccountKey`, `ServiceAccountKeyCreated`, `ServiceAccountKeyScope`, `CreateServiceAccountKeyRequest`, `RotateServiceAccountKeyRequest`, parameter `ServiceAccountKeyId`, and a paragraph in `info.description` | REQ-API-030, ADR-018. Additive |
+| `x-token-scopes` on `getCurrentUser`, `listDevices`, `getDevice`, `wakeDevice`, `shutdownDevice`, `probeDevice`, `getDeviceHistory`, `listCommands`, `getCommand`, `getSystemMetrics`, `getSystemInfo`, `listActivity` (`mcp`), on the three legacy operations (`legacy`, `mcp`) and on rotation (`legacy`, `mcp`) | REQ-API-029. Behaviour for session tokens is unchanged |
+| `403` added to the `mcp` operations above; `Forbidden` description widened to cover keys | a `legacy` key on an `mcp` operation is refused with `403`, which the conformance check requires to be declared |
+
+`make generate` rewrote `internal/api/gen/api.gen.go`. The frontend's generated types
+(`frontend/src/api/generated`) were **not** regenerated here (submodule untouched); `make ui-check-api`
+will report them stale until the owner runs `npm run gen:api`.

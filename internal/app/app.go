@@ -24,6 +24,7 @@ import (
 	"github.com/thanhtunguet/homecore/internal/monitoring"
 	"github.com/thanhtunguet/homecore/internal/retention"
 	"github.com/thanhtunguet/homecore/internal/secrets"
+	"github.com/thanhtunguet/homecore/internal/servicekey"
 	"github.com/thanhtunguet/homecore/internal/storage"
 	"github.com/thanhtunguet/homecore/internal/system"
 	"github.com/thanhtunguet/homecore/internal/version"
@@ -96,6 +97,10 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 	}
 
 	auditWriter := audit.NewWriter(db, nil)
+	keySvc, err := servicekey.New(servicekey.Config{DB: db, Sealer: sealer, Audit: auditWriter})
+	if err != nil {
+		return err
+	}
 	ctlKey, created, err := controllerkey.LoadOrCreate(ctx, db, sealer, nil)
 	if err != nil {
 		return err
@@ -142,6 +147,7 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 		Targets: []retention.Target{
 			{Name: "device_status_history", Prune: devRepo.PruneHistory},
 			{Name: "commands", Prune: cmdRepo.PruneTerminal},
+			{Name: "service_account_keys", Prune: keySvc.Prune},
 			{Name: "ddns_sync_history", Prune: func(ctx context.Context, cutoff time.Time, limit int) (int64, error) {
 				return ddns.PruneSyncHistory(ctx, db, cutoff, limit)
 			}},
@@ -176,6 +182,7 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 		Log:             log,
 		DB:              db,
 		Auth:            authSvc,
+		ServiceKeys:     keySvc,
 		Devices:         devSvc,
 		Commands:        engine,
 		Monitor:         mon,

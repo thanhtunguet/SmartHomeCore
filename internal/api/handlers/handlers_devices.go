@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -328,6 +329,12 @@ func (h *Handlers) auditTarget(r *http.Request, action, targetType, targetID, re
 	}
 	if p, ok := auth.FromContext(r.Context()); ok {
 		e.ActorUserID, e.Actor = p.UserID, p.Username
+		if p.KeyID != "" { // made with a service account key: say which one (copy, the map may be shared)
+			d := make(map[string]any, len(details)+1)
+			maps.Copy(d, details)
+			d["service_key_id"] = p.KeyID
+			e.Details = d
+		}
 	}
 	if err := h.Audit.Write(r.Context(), e); err != nil {
 		h.Log.Warn("audit write failed", "action", action, "err", err)

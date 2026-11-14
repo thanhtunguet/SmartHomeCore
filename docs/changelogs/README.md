@@ -5,6 +5,7 @@ that spans days uses its end date). Newest entries are listed first below.
 
 | Date | Entry | Summary |
 |------|-------|---------|
+| 2026-11-14 | [2026-11-14-service-account-keys.md](2026-11-14-service-account-keys.md) | Service account keys: server-generated Ed25519 keys (sealed private key), TTL default 1 year, scopes `legacy`/`mcp`, create/list/revoke, self-rotation with grace and idempotent retry, migration `0007` (ADR-018) |
 | 2026-11-14 | [2026-11-14-legacy-paths-origin.md](2026-11-14-legacy-paths-origin.md) | Device sheet: legacy endpoints show path only; Origin is its own copyable field |
 | 2026-11-14 | [2026-11-14-legacy-endpoints.md](2026-11-14-legacy-endpoints.md) | Legacy `GET /api/turn-on\|turn-off\|is-online?device=`, `homecore token create` (scoped long-lived tokens), device-sheet URLs (ADR-017) |
 | 2026-11-14 | [2026-11-14-windows-power.md](2026-11-14-windows-power.md) | Windows power adapter for the Agent (shutdown/reboot via `InitiateSystemShutdownExW`, runs elevated) |

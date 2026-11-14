@@ -21,6 +21,7 @@ import (
 	"github.com/thanhtunguet/homecore/internal/httpx"
 	"github.com/thanhtunguet/homecore/internal/monitoring"
 	"github.com/thanhtunguet/homecore/internal/platform"
+	"github.com/thanhtunguet/homecore/internal/servicekey"
 	"github.com/thanhtunguet/homecore/internal/storage"
 	"github.com/thanhtunguet/homecore/internal/version"
 )
@@ -47,6 +48,9 @@ type Handlers struct {
 	// Phase 3.
 	ControllerKey *controllerkey.Key // GET /system/controller-key (nil: 501)
 	Activity      *activity.Service  // GET /activity (nil: 501)
+
+	// Service account keys (ADR-018; nil: 501).
+	ServiceKeys *servicekey.Service
 
 	// Phase 4.
 	DDNS    *ddns.Service            // DDNS configurations, Cloudflare lookups, manual sync (nil: 501)

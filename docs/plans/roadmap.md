@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | Brief §7 (phases), §8 (MVP); [architecture](../design/architecture.md) |
-| Last updated | 2026-11-14 (legacy endpoints; build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
+| Last updated | 2026-11-14 (service account keys; legacy endpoints; build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
 
 Legend: `[x]` done and verified · `[~]` partially done · `[ ]` not started.
 Tick items in the same change that completes them, and add a changelog entry.
@@ -121,6 +121,17 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [x] Device sheet section with the three copyable URLs (REQ-UI-021)
 - [ ] Try it with a real old app instance, and in a browser (clipboard, layout)
 
+## Service account keys (ADR-018)
+
+- [x] Migration `0007`, `internal/servicekey`: server-generated Ed25519 keys, sealed private key, EdDSA credential, TTL default 1 year (REQ-AUTH-021/022, REQ-SEC-006)
+- [x] `x-token-scopes` in the spec and `Requirement.Scopes` in `middleware.Authorize`; scopes `legacy` and `mcp` (REQ-API-029, REQ-AUTH-023)
+- [x] `POST/GET /service-account-keys`, `DELETE /service-account-keys/{id}`, `POST /auth/service-key/rotate` with grace window and idempotent retry (REQ-API-030, REQ-AUTH-024..026)
+- [x] Audit and retention (REQ-AUTH-027)
+- [ ] UI screen for keys (frontend submodule; regenerate its types with `npm run gen:api`)
+- [ ] `homecore` subcommand to create a key without the API (bootstrap on a headless box)
+- [ ] The MCP server that consumes `mcp` keys (a separate project)
+- [ ] Review the `mcp` allowlist with a real agent (is `shutdownDevice` something an agent should hold?)
+
 ## Phase 5 — Android integration
 
 - [ ] Kotlin lifecycle wrapper (foreground service, boot receiver, restart recovery)
@@ -163,5 +174,6 @@ Tick items in the same change that completes them, and add a changelog entry.
 | Shorten the deadline sweep (5 s) or complete deadline exactly via a timer, if second-level accuracy of `timed_out` ever matters | REQ-CMD-006 |
 | Endpoint for `ddns_sync_history` (the UI sees only the `last_*` fields and the activity feed) | REQ-DDNS known gaps |
 | Sub-tick backoff (the syncer ticks every 5 s, so a 1 s retry waits for the next tick); make the tick a config key if it matters | REQ-DDNS known gaps |
-| Revoke one legacy token (deny-list by `jti`) and `homecore user disable\|enable\|delete`; today a token dies with its account (set `disabled` with SQL) or by replacing the signing key | ADR-017, REQ-AUTH-020 |
+| ~~Revoke one legacy token~~ solved for new integrations by service account keys (ADR-018); the HS256 legacy tokens still die only with their account. `homecore user disable\|enable\|delete` is still missing (set `disabled` with SQL) | ADR-017, ADR-018, REQ-AUTH-020 |
+| Per-key device restrictions, a cap on keys per user, user-facing rotate-by-id | ADR-018 |
 | Windows metrics (gopsutil compiles for it, untested; load average is restricted there) | REQ-SYS-001 |

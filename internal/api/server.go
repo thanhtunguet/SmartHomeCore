@@ -31,6 +31,7 @@ import (
 	"github.com/thanhtunguet/homecore/internal/httpx"
 	"github.com/thanhtunguet/homecore/internal/monitoring"
 	"github.com/thanhtunguet/homecore/internal/platform"
+	"github.com/thanhtunguet/homecore/internal/servicekey"
 	"github.com/thanhtunguet/homecore/internal/storage"
 	"github.com/thanhtunguet/homecore/web"
 )
@@ -51,8 +52,9 @@ type Deps struct {
 	ShutdownTimeout time.Duration
 	Log             *slog.Logger
 	DB              *storage.DB
-	Authn           auth.Authenticator // defaults to Auth, then to auth.RejectAll
-	Auth            *auth.Service      // login/refresh/logout/me; nil answers 501
+	Authn           auth.Authenticator  // defaults to Auth (plus ServiceKeys when set), then to auth.RejectAll
+	Auth            *auth.Service       // login/refresh/logout/me; nil answers 501
+	ServiceKeys     *servicekey.Service // service account keys (ADR-018); nil answers 501 and EdDSA keys are not accepted
 
 	// Device management; each nil service makes its operations answer 501.
 	Devices  *devices.Service
@@ -78,6 +80,9 @@ type Server struct {
 func New(d Deps) (*Server, error) {
 	if d.Authn == nil && d.Auth != nil {
 		d.Authn = d.Auth
+		if d.ServiceKeys != nil { // service account keys are EdDSA JWTs, session tokens are HS256
+			d.Authn = auth.Router{Default: d.Auth, ByAlg: map[string]auth.Authenticator{servicekey.Algorithm: d.ServiceKeys}}
+		}
 	}
 	if d.Authn == nil {
 		d.Authn = auth.RejectAll{}
@@ -155,6 +160,7 @@ func newRouter(d Deps) (http.Handler, error) {
 
 	h := handlers.New(d.DB, d.Log)
 	h.Auth = d.Auth
+	h.ServiceKeys = d.ServiceKeys
 	h.Devices, h.Commands, h.Monitor, h.Audit = d.Devices, d.Commands, d.Monitor, d.Audit
 	h.ControllerKey, h.Activity = d.ControllerKey, d.Activity
 	h.DDNS, h.Metrics = d.DDNS, d.Metrics

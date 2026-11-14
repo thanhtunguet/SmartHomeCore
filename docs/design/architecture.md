@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1 |
-| Last reviewed | 2026-11-14 (legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
+| Last reviewed | 2026-11-14 (service account keys; legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
 | Requirements | [requirements/overview.md](../requirements/overview.md) |
 | Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs) |
 | API contract | [api/openapi.yaml](../../api/openapi.yaml) (source of truth) |
@@ -595,6 +595,37 @@ sealed copies and deletes refresh rows that expired or were revoked > 24 h ago o
 may be running; SQLite WAL + 5 s busy timeout), migrates it if needed, and takes the password from
 `HOMECORE_PASSWORD`, else stdin when not a terminal, else a no-echo prompt asked twice
 (`internal/platform/tty`, `golang.org/x/sys` only). It never prints or logs the password.
+
+### 10.2 Service account keys (`internal/servicekey`, ADR-018)
+
+Long-lived credentials for legacy clients and AI agents, next to the session tokens of §10.1.
+
+```mermaid
+sequenceDiagram
+    participant U as User (session token)
+    participant A as Agent / MCP server
+    participant C as Controller
+    U->>C: POST /service-account-keys {name, scope, ttl}
+    C->>C: generate Ed25519 pair, seal private key in the DB
+    C-->>U: 201 {id, ..., key} (the key is shown once)
+    U->>A: hand over the key
+    A->>C: any scoped call, Authorization: Bearer key
+    C->>C: kid lookup, verify signature, check row + owner, check x-token-scopes
+    A->>C: POST /auth/service-key/rotate (old key)
+    C->>C: re-validate old key, insert new key, supersede old (grace 1 min)
+    C-->>A: 200 {new key} (a retry inside the grace returns the same new key)
+```
+
+- `auth.Router` picks the authenticator from the JWT header `alg`: HS256 to `auth.Service`
+  (sessions, legacy tokens), EdDSA to `servicekey.Service`. Both fill `auth.Principal`; a key sets
+  `Scope` and `KeyID`.
+- `middleware.Authorize` compares `Principal.Scope` with the operation's `x-token-scopes`
+  (`Requirement.Scopes`, derived from the spec by `PolicyFromSpec`). Session tokens have no scope and
+  pass everywhere; a scoped credential passes only where its scope is listed.
+- The private key lives in `service_account_keys.private_key_sealed`. The credential is rebuilt from the
+  row when a rotation is retried, never stored.
+- Dependency direction: handlers → `servicekey` → `auth` (types), `secrets`, `storage`, `audit`.
+  `auth` does not import `servicekey`; the router wiring is in `api.New` and `internal/app`.
 
 ---
 
