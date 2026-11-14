@@ -39,6 +39,9 @@ type Repository interface {
 	Create(ctx context.Context, d Device) error
 	// Get returns the device with its binding. ErrNotFound.
 	Get(ctx context.Context, id string) (Device, error)
+	// GetByName returns the device with this name, compared case-insensitively like the unique
+	// index. ErrNotFound.
+	GetByName(ctx context.Context, name string) (Device, error)
 	// Update writes the configuration columns of d (never the observed state). When syncAgent is
 	// true the binding is upserted from d.Agent. ErrNotFound, ErrNameTaken, ErrAgentTaken.
 	Update(ctx context.Context, d Device, syncAgent bool) error

@@ -406,3 +406,43 @@ record it did not choose. The first metrics call can take up to ~750 ms. A new d
 (`github.com/shirou/gopsutil/v4`, plus its small transitive set) was approved with the Phase 4 brief.
 Not decided: rotation of provider lists at runtime (needs a restart), multi-record configurations and
 wildcard records.
+
+
+---
+
+## ADR-017 — Legacy device endpoints and long-lived, scoped client tokens
+
+**Context.** Apps written for the single-device predecessor call three plain `GET`s:
+`/api/turn-on`, `/api/turn-off` and `/api/is-online` (the last answers the text `true` or `false`).
+The Controller now manages many devices, so each call must say which one. The old apps cannot do
+a login and refresh cycle, but they already send a fixed `Authorization: Bearer <string>` header
+(2026-11-14), so the endpoints can stay authenticated instead of being opened to the LAN.
+
+**Decision.**
+- **Three spec operations** `legacyTurnOn`, `legacyTurnOff`, `legacyIsOnline` at `GET /api/turn-on`,
+  `/api/turn-off`, `/api/is-online`, tagged `legacy`, security `bearerAuth` (not public). The device is
+  the required query parameter `device`: a UUID is an id, anything else a name (case-insensitive).
+  Ids issued here are UUIDv7 (never integers), so in practice the name is used; a numeric value is a
+  name. The UI builds the URL with the name unless the id is an integer.
+- **Adapters, not a second implementation.** Turn-on/off call the same `commands.Engine` requests as
+  wake and shutdown (same idempotency, same `409`s, same audit `device.wake`/`device.shutdown`, with
+  `via: legacy` in the details) and share the one-per-device-per-second throttle (ADR-012), applied
+  after the device is resolved so a name and an id of one device share a slot. Success is `200`
+  with the text `true` (old apps expect a plain success, not `202` plus JSON); every failure uses the
+  usual JSON envelope and status.
+- **Long-lived scoped tokens.** `homecore token create --user NAME [--label] [--ttl 10y]` signs an
+  ordinary HS256 access token for an existing account with a `scp: "legacy"` claim and a long
+  lifetime (default 10 years, at most 20). `middleware.Authorize` refuses a scoped token with `403`
+  on every operation that is not tagged `legacy` in the spec, so a leaked client token can do
+  nothing beyond what the old app could already do. The token is printed once and never stored;
+  the audit entry `auth.legacy_token_issue` records user, label, token id and expiry only.
+- **Revocation** is the account's: the token is checked against the `users` row on every request,
+  so disabling or deleting the account kills it; replacing the JWT signing key kills all tokens.
+  There is no per-token revocation list (no new table); one account per client gives per-client
+  revocation. `user passwd` does not revoke access tokens (REQ-AUTH known gap).
+
+**Consequences.** A leaked token can wake and shut down every device until it expires or its account
+is disabled; a `GET` that powers a machine off is also exposed to link prefetchers and to proxies
+that log URLs (the token is in a header, not the URL, which is why it is not a query parameter).
+Disabling an account still needs SQL until `homecore user disable` exists (backlog). Not decided:
+a revocation list, per-token labels in a table, restricting a token to chosen devices.

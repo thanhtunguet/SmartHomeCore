@@ -42,6 +42,23 @@ func throttled(method, pattern string) bool {
 	return pattern == "/api/v1/devices/{id}/wake" || pattern == "/api/v1/devices/{id}/shutdown"
 }
 
+// Admit records a power request for the device and returns 0, or the time to wait when it must be
+// rejected. The legacy endpoints call it after resolving a device by name, so both spellings of one
+// device share one slot with the /api/v1 endpoints. A nil or disabled throttle admits everything.
+func (t *DeviceThrottle) Admit(deviceID string) time.Duration {
+	if t == nil || t.interval <= 0 {
+		return 0
+	}
+	return t.admit(strings.ToLower(deviceID))
+}
+
+// WriteRejection answers `429 rate_limited` with Retry-After for a wait returned by Admit.
+func WriteRejection(w http.ResponseWriter, wait time.Duration) {
+	w.Header().Set("Retry-After", strconv.Itoa(max(1, int(math.Ceil(wait.Seconds())))))
+	httpx.WriteError(w, http.StatusTooManyRequests, "rate_limited",
+		"this device already received a wake/shutdown request; retry in a moment")
+}
+
 // admit records a request for key and returns 0, or the time to wait when it must be rejected.
 // A rejected request does not extend the window.
 func (t *DeviceThrottle) admit(key string) time.Duration {
@@ -78,9 +95,7 @@ func (t *DeviceThrottle) Middleware(next http.Handler) http.Handler {
 			return
 		}
 		if wait := t.admit(strings.ToLower(chi.URLParam(r, "id"))); wait > 0 {
-			w.Header().Set("Retry-After", strconv.Itoa(max(1, int(math.Ceil(wait.Seconds())))))
-			httpx.WriteError(w, http.StatusTooManyRequests, "rate_limited",
-				"this device already received a wake/shutdown request; retry in a moment")
+			WriteRejection(w, wait)
 			return
 		}
 		next.ServeHTTP(w, r)

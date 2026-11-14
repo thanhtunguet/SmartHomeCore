@@ -5,7 +5,7 @@
 | Brief | §3.2 (devices, online monitoring), §3.3 (Wake-on-LAN), §3.4 (commands, "wake many"), §4 (REST API), §6 |
 | Code | `internal/devices` (`device.go`, `validate.go`, `service.go`, `repo.go`, `repo_sqlite.go`), `internal/monitoring` (`monitoring.go`, `monitor.go`), `internal/commands` (`commands.go`, `engine.go`, `wake.go`, `repo.go`, `repo_sqlite.go`), `internal/wol`, `internal/retention`, `internal/page`, `internal/api/handlers/handlers_devices.go`, `handlers_commands.go`, `internal/app/app.go`; shutdown dispatcher and agent status: `internal/agentctl` ([shutdown-agent.md](shutdown-agent.md)) |
 | Design | [architecture §6.2, §6.3, §6.5, §8, §9](../design/architecture.md), [database.md](../design/database.md) (`devices`, `agent_bindings`, `device_status_history`, `commands`, §5 lifecycle), [ADR-003](../design/decisions.md), [ADR-012](../design/decisions.md#adr-012--idempotent-fail-fast-power-commands-with-a-per-device-throttle), [ADR-014](../design/decisions.md#adr-014--phase-2-decisions-manual-probes-feed-hysteresis-client-side-wake-many-urgent-probing) |
-| Last updated | 2026-11-14 (Phase 4: REQ-RET-001 DDNS history prune now tested; earlier: Phase 3 shutdown, agent status) |
+| Last updated | 2026-11-14 (REQ-DEV-012 name lookup; Phase 4: REQ-RET-001 DDNS history prune now tested; earlier: Phase 3 shutdown, agent status) |
 | Status | **Implemented** for devices, monitoring, wake, shutdown, command history and retention (the shutdown dispatcher and its requirements are in [shutdown-agent.md](shutdown-agent.md), REQ-SHD-*) |
 
 Every endpoint response is validated against `api/openapi.yaml` by the test helper in
@@ -28,6 +28,7 @@ unless a package is given.
 | REQ-DEV-009 | `power_transition` (`none`/`waking`/`shutting_down`) is derived from the device's active command in every device response (get, list, create, update), using one query per list, never stored. If both types are active the newer one wins. | Implemented | `TestWakeLifecycleOverHTTP`, `TestCommandListFiltersPaginationAndErrors`, `commands.TestWakeSendsMagicPacketAndIsSent` |
 | REQ-DEV-010 | Device create, update, delete, agent removal and wake write `audit_log` entries with the acting user (`device.create`, `device.update`, `device.delete`, `device.agent_remove`, `device.wake`, and from Phase 3 `device.shutdown`, REQ-SHD-009); only accepted requests, no secrets. | Implemented | `TestDeviceChangesAreAudited`, `TestShutdownEndToEndWithARealAgent` |
 | REQ-DEV-011 | Every device operation requires authentication (`401` without or with an invalid token) and is `404` for an unknown id, `400` for a malformed id. | Implemented | `TestEveryImplementedOperationRequiresAuthentication`, `TestUnknownDeviceIs404EverywhereAndBadIDIs400` |
+| REQ-DEV-012 | `devices.Service.Resolve(ref)` finds a device by id (a UUID, any case) or by name (case-insensitive, surrounding space ignored); an empty reference or no match is `ErrNotFound`. A UUID that matches no id is then tried as a name. There are no integer ids, so a numeric reference is a name. Used by the legacy endpoints (REQ-API-026). | Implemented | `TestResolveByIDOrName` |
 
 ## Monitoring
 

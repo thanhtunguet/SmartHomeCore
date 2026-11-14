@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+	"maps"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -12,6 +14,10 @@ import (
 	"github.com/thanhtunguet/homecore/internal/httpx"
 )
 
+// errUnauthenticated is returned when a handler runs without the principal Authorize stores; it
+// cannot happen behind the middleware and is answered as 401.
+var errUnauthenticated = errors.New("missing principal")
+
 // WakeDevice sends Wake-on-LAN. Asynchronous and idempotent (ADR-012): it answers 202 with the
 // command, which is the already active wake command, or one born completed when the device is
 // already online. A missing MAC address is 409; the per-device 1 req/s limit (429) is applied by
@@ -21,19 +27,11 @@ func (h *Handlers) WakeDevice(w http.ResponseWriter, r *http.Request, id gen.Dev
 		h.Unimplemented.WakeDevice(w, r, id)
 		return
 	}
-	p, ok := auth.FromContext(r.Context())
-	if !ok {
-		httpx.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
-		return
-	}
-	c, err := h.Commands.Request(r.Context(), commands.Request{
-		DeviceID: id.String(), Type: commands.TypeWake, RequestedBy: p.UserID,
-	})
+	c, err := h.requestWake(r, id.String(), nil)
 	if err != nil {
 		h.apiError(w, r, "wake device", err)
 		return
 	}
-	h.audit(r, "device.wake", id.String(), map[string]any{"command_id": c.ID, "status": string(c.Status)})
 	httpx.WriteJSON(w, http.StatusAccepted, toAPICommand(c))
 }
 
@@ -49,17 +47,45 @@ func (h *Handlers) ShutdownDevice(w http.ResponseWriter, r *http.Request, id gen
 		h.Unimplemented.ShutdownDevice(w, r, id)
 		return
 	}
-	p, ok := auth.FromContext(r.Context())
-	if !ok {
-		httpx.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
-		return
-	}
-	c, err := h.Commands.Request(r.Context(), commands.Request{
-		DeviceID: id.String(), Type: commands.TypeShutdown, RequestedBy: p.UserID,
-	})
+	c, err := h.requestShutdown(r, id.String(), nil)
 	if err != nil {
 		h.apiError(w, r, "shutdown device", err)
 		return
+	}
+	httpx.WriteJSON(w, http.StatusAccepted, toAPICommand(c))
+}
+
+// requestWake issues the wake command for the authenticated caller and audits it. extra is added to
+// the audit details (the legacy endpoints record how they were called).
+func (h *Handlers) requestWake(r *http.Request, deviceID string, extra map[string]any) (commands.Command, error) {
+	p, ok := auth.FromContext(r.Context())
+	if !ok {
+		return commands.Command{}, errUnauthenticated
+	}
+	c, err := h.Commands.Request(r.Context(), commands.Request{
+		DeviceID: deviceID, Type: commands.TypeWake, RequestedBy: p.UserID,
+	})
+	if err != nil {
+		return commands.Command{}, err
+	}
+	details := map[string]any{"command_id": c.ID, "status": string(c.Status)}
+	maps.Copy(details, extra)
+	h.audit(r, "device.wake", deviceID, details)
+	return c, nil
+}
+
+// requestShutdown issues the shutdown command for the authenticated caller and audits it, with
+// the failure code when dispatch already failed. extra is added to the audit details.
+func (h *Handlers) requestShutdown(r *http.Request, deviceID string, extra map[string]any) (commands.Command, error) {
+	p, ok := auth.FromContext(r.Context())
+	if !ok {
+		return commands.Command{}, errUnauthenticated
+	}
+	c, err := h.Commands.Request(r.Context(), commands.Request{
+		DeviceID: deviceID, Type: commands.TypeShutdown, RequestedBy: p.UserID,
+	})
+	if err != nil {
+		return commands.Command{}, err
 	}
 	details := map[string]any{"command_id": c.ID, "status": string(c.Status)}
 	result := audit.ResultOK
@@ -68,12 +94,13 @@ func (h *Handlers) ShutdownDevice(w http.ResponseWriter, r *http.Request, id gen
 		details["error_code"] = c.ErrorCode
 	}
 	if h.Devices != nil {
-		if d, err := h.Devices.Get(r.Context(), id.String()); err == nil {
+		if d, err := h.Devices.Get(r.Context(), deviceID); err == nil {
 			details["name"] = d.Name
 		}
 	}
-	h.auditResult(r, "device.shutdown", id.String(), result, details)
-	httpx.WriteJSON(w, http.StatusAccepted, toAPICommand(c))
+	maps.Copy(details, extra)
+	h.auditResult(r, "device.shutdown", deviceID, result, details)
+	return c, nil
 }
 
 // ListCommands returns the command history, newest first, optionally filtered by device and status.

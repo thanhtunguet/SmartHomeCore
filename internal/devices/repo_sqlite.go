@@ -156,6 +156,18 @@ func (r *SQLiteRepository) Get(ctx context.Context, id string) (Device, error) {
 	return d, nil
 }
 
+// GetByName implements Repository. devices.name is UNIQUE COLLATE NOCASE, so at most one row matches.
+func (r *SQLiteRepository) GetByName(ctx context.Context, name string) (Device, error) {
+	d, err := scanDevice(r.db.QueryRowContext(ctx, deviceSelect+` WHERE d.name = ? COLLATE NOCASE`, name))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Device{}, ErrNotFound
+	}
+	if err != nil {
+		return Device{}, fmt.Errorf("get device by name: %w", err)
+	}
+	return d, nil
+}
+
 // Update implements Repository.
 func (r *SQLiteRepository) Update(ctx context.Context, d Device, syncAgent bool) error {
 	err := r.db.WithTx(ctx, func(tx *sql.Tx) error {

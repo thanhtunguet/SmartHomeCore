@@ -32,7 +32,14 @@ type Claims struct {
 	IssuedAt int64  `json:"iat"` // unix seconds
 	Expires  int64  `json:"exp"` // unix seconds
 	ID       string `json:"jti"`
+	// Scope restricts what the token may call. Empty is a normal session token. ScopeLegacy
+	// tokens are accepted only on operations tagged `legacy` in the spec (see ADR-017).
+	Scope string `json:"scp,omitempty"`
 }
+
+// ScopeLegacy marks a long-lived token for the legacy device endpoints (/api/turn-on,
+// /api/turn-off, /api/is-online). It is useless on every other operation.
+const ScopeLegacy = "legacy"
 
 // UserLookup resolves the user an access token claims to belong to. JWT calls it on every
 // request, so a disabled or deleted account loses access immediately instead of when the token
@@ -78,15 +85,24 @@ var jwtHeader = b64url.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
 
 // Issue creates an access token for u valid for TTL(). It returns the token and its expiry.
 func (j *JWT) Issue(u User) (token string, expires time.Time, err error) {
+	return j.IssueScoped(u, j.ttl, "")
+}
+
+// IssueScoped creates a token for u that is valid for ttl and limited to scope (empty: no
+// limit). It backs `homecore token create`, whose tokens outlive a session by years.
+func (j *JWT) IssueScoped(u User, ttl time.Duration, scope string) (token string, expires time.Time, err error) {
+	if ttl <= 0 {
+		return "", time.Time{}, errors.New("jwt: ttl must be positive")
+	}
 	now := j.now()
-	expires = now.Add(j.ttl)
+	expires = now.Add(ttl)
 	jti := make([]byte, 16)
 	if _, err := rand.Read(jti); err != nil {
 		return "", time.Time{}, err
 	}
 	payload, err := json.Marshal(Claims{
 		Subject: u.ID, Username: u.Username,
-		IssuedAt: now.Unix(), Expires: expires.Unix(), ID: b64url.EncodeToString(jti),
+		IssuedAt: now.Unix(), Expires: expires.Unix(), ID: b64url.EncodeToString(jti), Scope: scope,
 	})
 	if err != nil {
 		return "", time.Time{}, err
@@ -166,5 +182,5 @@ func (j *JWT) Authenticate(ctx context.Context, bearerToken string) (Principal, 
 	if err != nil || u.Disabled {
 		return Principal{}, ErrUnauthenticated
 	}
-	return Principal{UserID: u.ID, Username: u.Username}, nil
+	return Principal{UserID: u.ID, Username: u.Username, Scope: c.Scope}, nil
 }

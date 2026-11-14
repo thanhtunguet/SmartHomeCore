@@ -16,6 +16,7 @@ import (
 type Principal struct {
 	UserID   string
 	Username string
+	Scope    string // empty for a session token, ScopeLegacy for a legacy client token
 }
 
 // ErrUnauthenticated is returned when a token is missing, malformed, expired or revoked.

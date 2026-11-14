@@ -19,7 +19,7 @@ docs/
 | [overview.md](requirements/overview.md) | Product summary, goals, platforms, MVP scope, non-goals, **brief traceability matrix** |
 | [runtime-and-configuration.md](requirements/runtime-and-configuration.md) | `REQ-RT`: modes, configuration, lifecycle, logging, mobile bindings, cross-compile |
 | [http-api.md](requirements/http-api.md) | `REQ-API`: REST foundation, docs, health, authN/authZ, middleware |
-| [authentication.md](requirements/authentication.md) | `REQ-AUTH`: passwords, JWT, refresh rotation and grace window, audit, `homecore user` |
+| [authentication.md](requirements/authentication.md) | `REQ-AUTH`: passwords, JWT, refresh rotation and grace window, audit, `homecore user`, legacy client tokens (`homecore token`) |
 | [devices-and-commands.md](requirements/devices-and-commands.md) | `REQ-DEV`, `REQ-MON`, `REQ-CMD`, `REQ-RET`: device registry, monitor, wake and command lifecycle, retention |
 | [storage-and-secrets.md](requirements/storage-and-secrets.md) | `REQ-ST`, `REQ-SEC`: SQLite, migrations, master key, sealing |
 | [ddns.md](requirements/ddns.md) | `REQ-DDNS`, `REQ-SYS`: public-IP quorum, Cloudflare client, DDNS configs and syncer, system metrics |

@@ -10,6 +10,7 @@ import (
 
 	"github.com/thanhtunguet/homecore/internal/activity"
 	"github.com/thanhtunguet/homecore/internal/api/gen"
+	"github.com/thanhtunguet/homecore/internal/api/middleware"
 	"github.com/thanhtunguet/homecore/internal/audit"
 	"github.com/thanhtunguet/homecore/internal/auth"
 	"github.com/thanhtunguet/homecore/internal/commands"
@@ -39,6 +40,9 @@ type Handlers struct {
 	Commands *commands.Engine    // wake, command history, power_transition
 	Monitor  *monitoring.Monitor // probe
 	Audit    *audit.Writer       // audit_log entries for device changes (nil: not written)
+	// Throttle is the shared wake/shutdown limiter (REQ-API-018); the legacy endpoints apply it
+	// after resolving the device. Nil admits everything.
+	Throttle *middleware.DeviceThrottle
 
 	// Phase 3.
 	ControllerKey *controllerkey.Key // GET /system/controller-key (nil: 501)

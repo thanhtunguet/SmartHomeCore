@@ -5,7 +5,7 @@
 | Brief | §3.1, §4, §6 (public API zone) |
 | Code | `internal/api` (`server.go`, `middleware/`, `handlers/`, `gen/`), `api/openapi.yaml`, `web/`; authentication: [authentication.md](authentication.md) |
 | Design | [architecture §6.1, §9, §10](../design/architecture.md), [ADR-006](../design/decisions.md#adr-006--spec-first-rest-api), [ADR-008](../design/decisions.md#adr-008--offline-swagger-ui) |
-| Last updated | 2026-11-14 (local interface names; Phase 4: DDNS endpoints, Cloudflare lookups, system metrics; earlier: Phase 3 shutdown, controller key, activity feed, agent status) |
+| Last updated | 2026-11-14 (legacy device endpoints; local interface names; Phase 4: DDNS endpoints, Cloudflare lookups, system metrics; earlier: Phase 3 shutdown, controller key, activity feed, agent status) |
 | Status | **Implemented**: foundation, authentication, devices, commands (wake and shutdown), controller key, activity feed, DDNS (incl. Cloudflare lookups) and system metrics. No documented operation returns `501` any more |
 
 ## Functional requirements
@@ -35,6 +35,9 @@
 | REQ-API-021 | `AgentBinding` returns read-only `status` (`ready`/`unreachable`/`unknown`, always present on a bound device, `unknown` until the first contact), `version` and `last_ok_at` (absent until a health check or accepted shutdown succeeded). They are updated by every shutdown attempt and by the once-a-minute health check of devices seen online (REQ-SHD-010/011); the device API cannot write them. | Implemented | `TestAgentBindingThroughTheAPI`, `TestAgentStatusFromTheHealthJobOverHTTP`, `agentctl.TestHealth*`, `devices.TestAgentContactIsRecordedAndForgottenOnRebind` |
 | REQ-API-023 | `GET /api/v1/activity` (`listActivity`, any authenticated user) is a read-only feed built **from `audit_log` only**, newest first (`at`, `id` descending), cursor-paginated (`limit` 1..200, `next_cursor` only when more exist; a bad limit, cursor, category or device id is `400`). Items: `id` (integer), `at`, `actor` (username snapshot, `cli`, `system`; absent when unknown), `category` (`auth`, `device`, `command`, `ddns`, `user`, `system`, derived from the action; `device.wake` and `device.shutdown` are `command`), `action`, `device_id`, `command_id`, `result` (`ok`, `failed` or an error code) and an English `message`. Filters `device_id` and `category`. Command outcomes are **not** duplicated here (`GET /commands/{id}` has them). Exposure: `remote_addr`, login failure reasons and every audit `details` field outside a whitelist (name, username, command id, status, error code, key id) are never returned. `audit_log` is not pruned (REQ-RET-002). | Implemented | `TestActivityFeedOverHTTP`, `activity.TestFeedOrderPaginationAndFilters`, `activity.TestCategorySQLMatchesCategoryOf`, `activity.TestFeedExposesOnlyWhitelistedData`, `activity.TestMessages`, `activity.TestBadRequests`; smoke test 2026-11-14 |
 | REQ-API-025 | `GET /api/v1/system/metrics` (`getSystemMetrics`, any authenticated user) returns the host snapshot of [ddns.md](ddns.md) REQ-SYS-001..004: hostname, platform, kernel, uptime, `cpu_percent` (absent until two samples exist), `cpu_cores`, `load_average`, memory, disk, `local_ips`, optional `local_addresses` (interface-name/IP pairs), `process` (pid, uptime, RSS, goroutines, heap) and `restricted` (always present). One collection per 3 s however often it is polled. | Implemented | `TestSystemMetricsOverHTTP`, `TestSystemLocalAddressesOverHTTP`, `TestDDNSAndMetricsRequireAuthentication`, `system.TestCachedServesOneSnapshotPerTTL` |
+| REQ-API-026 | **Legacy endpoints** (ADR-017) for apps that predate multi-device support: `GET /api/turn-on`, `GET /api/turn-off`, `GET /api/is-online`, each with the required query parameter `device` (a UUID is an id, anything else a name, compared case-insensitively; whitespace-only is `404`; missing is `400`). They need the normal `Authorization: Bearer` header (session token or a legacy token, REQ-AUTH-019); anonymous is `401`. `turn-on`/`turn-off` do what `POST /devices/{id}/wake`/`shutdown` do (idempotent, fail fast, `409` for no MAC / no agent binding, audited as `device.wake`/`device.shutdown` with the acting user and `via: legacy`) and answer `200` with the text `true`; they never wait for the machine. `is-online` answers `200` `true` when the stored status is `online`, else `false` (`offline`, `unknown`); unknown device is `404`. Text responses are `text/plain` with `Cache-Control: no-store`; errors use the JSON envelope. | Implemented | `TestLegacyTurnOnByNameAndByID`, `TestLegacyIsOnlineFollowsTheMonitor`, `TestLegacyErrorsUseTheEnvelope`, `TestLegacyTurnOffReachesTheAgent`, `TestPolicyMarksTheLegacyOperationsOnly`; `devices.TestResolveByIDOrName`; smoke test 2026-11-14 with the real binary |
+| REQ-API-027 | The legacy `turn-on`/`turn-off` share the one-request-per-device-per-second slot of `/api/v1` wake/shutdown (REQ-API-018), however the device is spelled (name or id): the second request is `429 rate_limited` with `Retry-After: 1`. `is-online` is not throttled. A client that sends turn-on and turn-off back to back therefore gets `429` on the second. | Implemented | `TestLegacyThrottleIsSharedWithV1` |
+| REQ-API-028 | A legacy-scoped token (`scp: legacy`) is accepted **only** on operations tagged `legacy` in the spec; on every other protected operation it gets `403 forbidden` even though the signature is valid. The policy is derived from the spec (`middleware.Requirement.Legacy`), so a new operation is closed to these tokens unless someone tags it. The `403` is not declared on the `/api/v1` operations (like the fail-closed policy `403`). | Implemented | `TestLegacyTokenIsScopedToTheLegacyEndpoints`, `TestPolicyMarksTheLegacyOperationsOnly` |
 | REQ-API-022 | Accounts are managed by the `homecore user add\|passwd` command (Phase 1b), not by the API or the UI; there is no first-run bootstrap account. | Implemented (`homecore user add\|passwd\|list`, REQ-AUTH-015..018) | `TestUserAddPasswdListEndToEnd` |
 | REQ-API-024 | `GET /api/v1/system/controller-key` (`getControllerKey`, any authenticated user) returns exactly `key_id`, `algorithm` (`ed25519`) and the base64 `public_key` of the active Controller key (REQ-SHD-001/002); never the private key. `401` without a token. | Implemented | `TestControllerKeyEndpoint`, `TestAgentTrustingTheAPIKeyAcceptsTheDispatcher` |
 
@@ -52,6 +55,7 @@ The full contract (brief §4 plus additions) is in `api/openapi.yaml`.
 | `POST /api/v1/devices/{id}/shutdown` | Implemented (Phase 3) |
 | `GET /api/v1/activity` | Implemented (Phase 3; new operation `listActivity`) |
 | `GET /api/v1/commands`, `GET /api/v1/commands/{id}` | Implemented (Phase 2) |
+| `GET /api/turn-on`, `/api/turn-off`, `/api/is-online` | Implemented (legacy, outside `/api/v1`; ADR-017) |
 | `/api/v1/system/info` | Implemented |
 | `/api/v1/system/controller-key` | Implemented (Phase 3) |
 | `/api/v1/system/metrics` | Implemented (Phase 4) |
@@ -97,6 +101,15 @@ and are stale for the same points.
 `make generate` rewrote `internal/api/gen/api.gen.go`; a second run is byte-identical. The frontend's
 generated types (`frontend/src/api/generated`) must be regenerated by the owner (`npm run gen:api`):
 the new operation and types, plus doc comments, appear there.
+
+## Spec change: legacy endpoints
+
+| Change | Why |
+|--------|-----|
+| New operations `legacyTurnOn`, `legacyTurnOff`, `legacyIsOnline` (tag `legacy`), parameter `LegacyDevice`, responses `LegacyTrue` and `Forbidden`, a `text/plain` body, and a paragraph in `info.description` | REQ-API-026..028, ADR-017. Additive; no existing operation changed |
+
+`make generate` rewrote `internal/api/gen/api.gen.go`; a second run is byte-identical. The frontend's
+generated types were regenerated (`npm run gen:api`).
 
 ## Spec changes in Phase 4
 

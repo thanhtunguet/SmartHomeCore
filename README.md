@@ -23,9 +23,15 @@ make run            # Controller on http://127.0.0.1:8080 with configs/dev.yaml
 open http://127.0.0.1:8080/api/docs/     # Swagger UI (offline)
 go run ./cmd/homecore user add --config configs/dev.yaml alice   # first account (prompts for the password; there is no default account)
 curl -s localhost:8080/readyz
+go run ./cmd/homecore token create --config configs/dev.yaml --user alice --label "kitchen tablet"   # long-lived token for an old app (see below)
 make test           # unit + integration tests
 make cross          # binaries for linux/{amd64,arm64,arm}, windows, darwin, android/arm64
 ```
+
+**Old apps** (single-device `GET /api/turn-on`, `/api/turn-off`, `/api/is-online`) work with a `device`
+query parameter, the device id or name: `curl -H "Authorization: Bearer $TOKEN" 'http://127.0.0.1:8080/api/is-online?device=Gaming%20PC'`.
+The token comes from `homecore token create`; it is valid for 10 years by default and only for those three
+endpoints. The device sheet in the web UI lists the three URLs with copy buttons (ADR-017).
 
 Try the signed-command flow against a dry-run agent:
 

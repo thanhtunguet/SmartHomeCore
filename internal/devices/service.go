@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -91,6 +92,23 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Device, error) {
 
 // Get returns one device. ErrNotFound if it does not exist.
 func (s *Service) Get(ctx context.Context, id string) (Device, error) { return s.repo.Get(ctx, id) }
+
+// Resolve finds a device by a reference that is either its id (a UUID) or its name (compared
+// case-insensitively, surrounding space ignored). It is how the legacy endpoints, whose clients
+// predate UUIDs, identify a device (ADR-017). ErrNotFound when nothing matches.
+func (s *Service) Resolve(ctx context.Context, ref string) (Device, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return Device{}, ErrNotFound
+	}
+	if id, err := uuid.Parse(ref); err == nil {
+		d, err := s.repo.Get(ctx, id.String())
+		if !errors.Is(err, ErrNotFound) {
+			return d, err
+		}
+	}
+	return s.repo.GetByName(ctx, ref)
+}
 
 // Update applies a partial update and returns the stored device. An empty UpdateInput changes
 // nothing (not even updated_at).

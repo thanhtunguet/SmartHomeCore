@@ -17,9 +17,14 @@ import (
 // SecuritySchemeName is the only security scheme the API uses.
 const SecuritySchemeName = "bearerAuth"
 
-// Requirement is the access rule of one operation: public, or any authenticated user.
+// LegacyTag marks, in the spec, the operations a legacy-scoped token may call (ADR-017).
+const LegacyTag = "legacy"
+
+// Requirement is the access rule of one operation: public, or any authenticated user. Legacy
+// operations additionally accept the long-lived tokens of `homecore token create`.
 type Requirement struct {
 	Public bool
+	Legacy bool
 }
 
 // Policy maps "METHOD /route/{pattern}" to its Requirement. It is derived from the OpenAPI spec,
@@ -38,6 +43,11 @@ func PolicyFromSpec(spec *openapi3.T) (Policy, error) {
 				reqs = *op.Security
 			}
 			var r Requirement
+			for _, t := range op.Tags {
+				if t == LegacyTag {
+					r.Legacy = true
+				}
+			}
 			if len(reqs) == 0 {
 				r.Public = true
 			}
@@ -90,6 +100,12 @@ func Authorize(policy Policy, authn auth.Authenticator, log *slog.Logger) func(h
 			if err != nil {
 				w.Header().Set("WWW-Authenticate", `Bearer realm="homecore", error="invalid_token"`)
 				httpx.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or expired token")
+				return
+			}
+			// A scoped token (long-lived, issued for old clients) is valid only where the spec
+			// says so; everywhere else it is refused even though the signature is good.
+			if principal.Scope != "" && !(principal.Scope == auth.ScopeLegacy && req.Legacy) {
+				httpx.WriteError(w, http.StatusForbidden, "forbidden", "this token is not valid for this endpoint")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))

@@ -3,9 +3,9 @@
 | | |
 |---|---|
 | Brief | §3.1 (JWT), §6 (public API zone, secrets), §6.6 |
-| Code | `internal/auth` (`password.go`, `jwt.go`, `service.go`, `store.go`, `accounts.go`), `internal/audit`, `internal/api/handlers/handlers_auth.go`, `cmd/homecore/user.go`, `internal/platform/tty`, migration `0004` |
+| Code | `internal/auth` (`password.go`, `jwt.go`, `service.go`, `store.go`, `accounts.go`), `internal/audit`, `internal/api/handlers/handlers_auth.go`, `cmd/homecore/user.go`, `cmd/homecore/token.go`, `internal/auth/clienttoken.go`, `internal/platform/tty`, migration `0004` |
 | Design | [architecture §10.1](../design/architecture.md#101-authentication-design), [database.md](../design/database.md) (`users`, `refresh_tokens`, `system_settings`, `audit_log`), [ADR-011](../design/decisions.md#adr-011--no-roles-every-authenticated-user-is-equal), [ADR-013](../design/decisions.md#adr-013--authentication-implementation-argon2id-stdlib-hs256-jwt-refresh-grace-window) |
-| Last updated | 2026-11-14 (Phase 1b) |
+| Last updated | 2026-11-14 (Phase 1b; legacy client tokens) |
 | Status | **Implemented** |
 
 No roles: every authenticated user is equal (ADR-011). Accounts are created with the
@@ -54,7 +54,16 @@ No roles: every authenticated user is equal (ADR-011). Accounts are created with
 | REQ-AUTH-017 | `user passwd` replaces the hash and, in the same transaction, revokes all refresh tokens of the user and wipes sealed successor copies. Access tokens already issued remain valid for at most `access_token_ttl`. | Implemented | `TestPasswordChangeRevokesRefreshTokens`, `TestUserAddPasswdListEndToEnd`; smoke test |
 | REQ-AUTH-018 | There is no first-run bootstrap account and no default password. The key `controller.auth.bootstrap_admin_user` was removed (a config that still sets it is rejected as an unknown key). A Controller that starts with no accounts runs and logs one warning telling the operator to run `homecore user add <username>`. | Implemented | `TestLoadBytesRejectsUnknownFieldsAndBadValues/removed_bootstrap_key`; startup warning by smoke test 2026-11-14 (no automated test) |
 
+## Legacy client tokens
+
+| ID | Requirement | Status | Verified by |
+|----|-------------|--------|-------------|
+| REQ-AUTH-019 | `homecore token create --user NAME [--label TEXT] [--ttl 10y]` (`cmd/homecore/token.go`, `auth.IssueLegacyToken`) signs an HS256 access token for an **existing, enabled** account with the claim `scp: "legacy"`, for old apps that cannot log in (ADR-017). `--ttl` is a Go duration or `Nd`/`Ny`, default 10 years, at most 20 (`auth.MaxLegacyTokenTTL`). Same `--config`/`--data-dir` handling as `homecore user`; it needs an **existing** database (a wrong path never mints a token for an empty one) and the master key (to unseal the JWT signing key, which is created if missing). The token is printed alone on stdout, details on stderr; it is never stored or logged. The audit entry `auth.legacy_token_issue` (actor `cli`) records user, label, token id (`jti`) and expiry, never the token. | Implemented | `TestTokenCreateIssuesALegacyScopedToken`, `TestTokenCreateRefusals`, `TestParseTTL`, `TestLegacyTokenIssuingRules` |
+| REQ-AUTH-020 | A legacy token is verified like any access token (REQ-AUTH-005/006/008: strict header, signature, expiry, account exists and is not disabled on every request) and `Principal.Scope` carries `legacy`; actions are attributed to the owning user. Scope enforcement: REQ-API-028. It cannot be refreshed. It stops working at expiry, when the account is disabled or deleted, or when the signing key is replaced; there is no per-token revocation list (one account per client gives per-client revocation). `user passwd` does not revoke it (access tokens are not revoked, see below). | Implemented | `TestLegacyTokenIsScopedToTheLegacyEndpoints` (disabled account → `401`) |
+
 ## Known gaps
+
+- A legacy token cannot be revoked on its own, and disabling the account still needs SQL (no `user disable` command); rotating the signing key revokes every token and session.
 
 - No `user disable|enable|delete` command: `users.disabled` is honoured everywhere (REQ-AUTH-006/007/008) but can only be set with SQL for now. Tracked in the roadmap backlog.
 - Logout and password change do not invalidate access tokens already issued (up to 15 min); only refresh tokens are revoked.

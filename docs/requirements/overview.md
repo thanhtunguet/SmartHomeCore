@@ -58,6 +58,7 @@ One build supports both roles; configuration selects `controller`, `agent` or `b
 | SQLite | **Implemented** | [storage-and-secrets.md](storage-and-secrets.md) |
 | JWT authentication | **Implemented** (Phase 1b): argon2id, HS256 access tokens, rotating refresh tokens with reuse detection and grace window, `homecore user` CLI; no roles (ADR-011) | [authentication.md](authentication.md) |
 | Cloudflare DDNS | **Implemented** (Phase 4): public-IP quorum, Cloudflare client, sealed tokens, scheduled and manual sync with backoff, zone/record lookups, audit; not yet run against the real Cloudflare | [ddns.md](ddns.md) |
+| Legacy single-device API (added after the brief, not in it) | **Implemented**: `GET /api/turn-on\|turn-off\|is-online?device=`, long-lived scoped tokens (`homecore token create`), URLs in the device sheet (ADR-017) | [http-api.md](http-api.md) REQ-API-026..028, [authentication.md](authentication.md) REQ-AUTH-019/020 |
 | Swagger UI at `/api/docs` | **Implemented** | [http-api.md](http-api.md) |
 | Static file serving | **Implemented** (UI embedded via `make build-full`; placeholder otherwise) | [http-api.md](http-api.md), [web-ui.md](web-ui.md) |
 

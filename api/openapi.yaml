@@ -7,6 +7,10 @@ info:
 
     * All `/api/v1` endpoints require a Bearer JWT unless marked otherwise.
     * There are no roles: every authenticated user may call every operation (ADR-011).
+    * The three `legacy` operations (`/api/turn-on`, `/api/turn-off`, `/api/is-online`) are for apps
+      that predate multi-device support. They take the device in a `device` query parameter and also
+      accept the long-lived, legacy-scoped tokens of `homecore token create`; such a token is refused
+      (`403`) on every other operation (ADR-017).
     * Wake/shutdown return `202 Accepted` with a command; poll `GET /api/v1/commands/{id}` for the outcome.
     * Wake/shutdown are **idempotent** and **fail fast**: repeating one has the effect of sending it
       once and is never an error (see each operation). At most **one wake/shutdown request per device
@@ -39,6 +43,8 @@ tags:
   - name: system
   - name: activity
   - name: ddns
+  - name: legacy
+    description: Three GET endpoints for apps written before multi-device support (ADR-017).
 
 paths:
   /healthz:
@@ -588,6 +594,77 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/turn-on:
+    get:
+      tags: [legacy, devices]
+      operationId: legacyTurnOn
+      summary: "Legacy: turn the device on (Wake-on-LAN)"
+      description: |
+        For old apps. Same as `POST /api/v1/devices/{id}/wake`, addressed by the `device` query
+        parameter, and answered with the plain text `true` once the request is accepted (`200`).
+        It does not wait for the machine to come up; poll `/api/is-online`.
+
+        `device` is the device id (UUID) or its name (case-insensitive). Authentication is the normal
+        `Authorization: Bearer` header; besides a session token, the long-lived tokens made by
+        `homecore token create` are accepted here. Errors use the usual JSON envelope: `404` unknown
+        device, `409` no MAC address, `429` more than one wake/shutdown per device per second.
+      parameters:
+        - $ref: "#/components/parameters/LegacyDevice"
+      responses:
+        "200": { $ref: "#/components/responses/LegacyTrue" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/turn-off:
+    get:
+      tags: [legacy, devices]
+      operationId: legacyTurnOff
+      summary: "Legacy: turn the device off (signed shutdown via its agent)"
+      description: |
+        For old apps. Same as `POST /api/v1/devices/{id}/shutdown`, addressed by the `device` query
+        parameter, and answered with the plain text `true` once the request is accepted (`200`).
+        It does not wait for the machine to go down; poll `/api/is-online`. The shutdown is audited
+        with the owner of the token. `409` when the device has no agent binding.
+
+        A `GET` that changes state is not safe to prefetch or cache: keep the token secret and do not
+        open this URL in a browser by accident.
+      parameters:
+        - $ref: "#/components/parameters/LegacyDevice"
+      responses:
+        "200": { $ref: "#/components/responses/LegacyTrue" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/is-online:
+    get:
+      tags: [legacy, devices]
+      operationId: legacyIsOnline
+      summary: "Legacy: is the device online? (plain text true or false)"
+      description: |
+        For old apps. Answers `200` with the plain text `true` when the Controller last observed the
+        device `online`, `false` otherwise (`offline` or `unknown`). Reads the stored status; it does
+        not probe. An unknown device is `404`, not `false`.
+      parameters:
+        - $ref: "#/components/parameters/LegacyDevice"
+      responses:
+        "200":
+          description: The text `true` or `false`
+          content:
+            text/plain:
+              schema: { type: string, enum: ["true", "false"] }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -606,6 +683,12 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    LegacyDevice:
+      name: device
+      in: query
+      required: true
+      description: The device's id (UUID) or its name, compared case-insensitively.
+      schema: { type: string, minLength: 1, maxLength: 128 }
     Limit:
       name: limit
       in: query
@@ -627,6 +710,13 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: |
+        The token is valid but not accepted here (code `forbidden`): a legacy-scoped token used
+        outside the `legacy` operations.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     NotFound:
       description: Not found
       content:
@@ -637,6 +727,11 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    LegacyTrue:
+      description: The request was accepted; the body is the text `true`.
+      content:
+        text/plain:
+          schema: { type: string, enum: ["true"] }
     TooManyRequests:
       description: Rate limited (code `rate_limited`); retry after the `Retry-After` header (seconds).
       headers:

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1 |
-| Last reviewed | 2026-11-14 (local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
+| Last reviewed | 2026-11-14 (legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
 | Requirements | [requirements/overview.md](../requirements/overview.md) |
 | Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs) |
 | API contract | [api/openapi.yaml](../../api/openapi.yaml) (source of truth) |
@@ -497,6 +497,7 @@ stays correct when rows are inserted or deleted between pages (no offset drift).
 | Zone | AuthN | AuthZ |
 |------|-------|-------|
 | REST API | JWT (HS256, 15 min) + rotating refresh token (30 d) | none: every authenticated user is equal (ADR-011) |
+| Legacy `GET /api/turn-on\|turn-off\|is-online` | the same JWT, or a long-lived `scp: legacy` token (`homecore token create`) | a legacy token is valid only on operations tagged `legacy` (ADR-017) |
 | Agent listener | Ed25519 signature by a trusted Controller key | action allowlist |
 | Swagger UI | none (static); API calls still require JWT | grants nothing |
 | Cloudflare | scoped API token | DNS edit on one zone |
@@ -512,7 +513,8 @@ Principles:
    code through `mobile` (to be designed with Phase 5; not exposed yet).
 7. Login is rate-limited per IP; generic error messages; argon2id with constant-time comparison; an
    unknown user costs the same as a wrong password (dummy hash).
-8. Agent runs unprivileged; power actions via polkit (Linux) / `SeShutdownPrivilege` (Windows).
+8. Long-lived client tokens exist only with the `legacy` scope and are refused (`403`) on every other operation; the spec, not the handlers, says which operations are legacy (tag `legacy`, `middleware.Requirement.Legacy`).
+9. Agent runs unprivileged; power actions via polkit (Linux) / `SeShutdownPrivilege` (Windows).
 
 ### 10.1 Authentication design
 
@@ -526,6 +528,8 @@ Decisions: [ADR-011](decisions.md#adr-011--no-roles-every-authenticated-user-is-
 
  POST /auth/login ───▶ auth.Service.Login ──▶ users (argon2id verify) ──▶ refresh_tokens (new family)
  any protected call ─▶ middleware.Authorize ─▶ auth.JWT.Authenticate ─▶ users (exists, not disabled)
+                                      └─ scoped token? only on operations tagged `legacy` in the spec, else 403
+ homecore token create ─▶ auth.IssueLegacyToken ─▶ JWT (scp=legacy, long ttl) + audit auth.legacy_token_issue
  POST /auth/refresh ─▶ auth.Service.Refresh ─▶ one transaction: rotate / grace / revoke family
  POST /auth/logout ──▶ auth.Service.Logout ──▶ revoke the family
 ```
@@ -540,7 +544,7 @@ master key (AAD `system_settings.auth.jwt_signing_key`) and stored in `system_se
 unrelated to the master key and to the Controller Ed25519 key (`internal/controllerkey`, Phase 3). Rotation = delete the row
 (signs everybody out; refresh tokens keep working).
 
-**Access token.** HS256 JWT, `sub`/`username`/`iat`/`exp`/`jti`, lifetime `access_token_ttl`.
+**Access token.** HS256 JWT, `sub`/`username`/`iat`/`exp`/`jti`, lifetime `access_token_ttl`. Legacy client tokens (ADR-017) are the same JWT plus `scp: "legacy"` and a lifetime of years.
 Verification: header must be exactly `alg=HS256` (`typ` JWT or absent, no other members) before the
 signature is looked at, constant-time MAC check, then claims. Clock handling: issuer and verifier
 are the same host, so there is no skew between parties; `exp` is strict, `iat` may be up to 1 minute

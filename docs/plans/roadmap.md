@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | Brief §7 (phases), §8 (MVP); [architecture](../design/architecture.md) |
-| Last updated | 2026-11-14 (build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
+| Last updated | 2026-11-14 (legacy endpoints; build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
 
 Legend: `[x]` done and verified · `[~]` partially done · `[ ]` not started.
 Tick items in the same change that completes them, and add a changelog entry.
@@ -114,6 +114,13 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [ ] Run once against the real Cloudflare API and the real public-IP providers
 - [ ] Run the metrics on a Linux host (only macOS was run; Linux is covered by `make cross`)
 
+## Legacy compatibility (ADR-017)
+
+- [x] `GET /api/turn-on`, `/api/turn-off`, `/api/is-online` with `?device=` (id or name), over the wake/shutdown services (REQ-API-026/027)
+- [x] `homecore token create`: long-lived `scp: legacy` tokens, refused outside the legacy operations (REQ-AUTH-019/020, REQ-API-028)
+- [x] Device sheet section with the three copyable URLs (REQ-UI-021)
+- [ ] Try it with a real old app instance, and in a browser (clipboard, layout)
+
 ## Phase 5 — Android integration
 
 - [ ] Kotlin lifecycle wrapper (foreground service, boot receiver, restart recovery)
@@ -156,4 +163,5 @@ Tick items in the same change that completes them, and add a changelog entry.
 | Shorten the deadline sweep (5 s) or complete deadline exactly via a timer, if second-level accuracy of `timed_out` ever matters | REQ-CMD-006 |
 | Endpoint for `ddns_sync_history` (the UI sees only the `last_*` fields and the activity feed) | REQ-DDNS known gaps |
 | Sub-tick backoff (the syncer ticks every 5 s, so a 1 s retry waits for the next tick); make the tick a config key if it matters | REQ-DDNS known gaps |
+| Revoke one legacy token (deny-list by `jti`) and `homecore user disable\|enable\|delete`; today a token dies with its account (set `disabled` with SQL) or by replacing the signing key | ADR-017, REQ-AUTH-020 |
 | Windows metrics (gopsutil compiles for it, untested; load average is restricted there) | REQ-SYS-001 |

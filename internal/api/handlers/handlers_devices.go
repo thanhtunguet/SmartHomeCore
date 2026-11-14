@@ -340,6 +340,8 @@ func (h *Handlers) apiError(w http.ResponseWriter, r *http.Request, op string, e
 	var dverr *ddns.ValidationError
 	var cferr *ddns.CloudflareError
 	switch {
+	case errors.Is(err, errUnauthenticated):
+		httpx.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
 	case errors.As(err, &cferr):
 		// Cloudflare refused or failed a lookup; its own reason is the message (never the token).
 		httpx.WriteError(w, http.StatusBadGateway, "cloudflare_error", cferr.Error())

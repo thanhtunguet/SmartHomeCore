@@ -576,3 +576,26 @@ func TestAgentContactIsRecordedAndForgottenOnRebind(t *testing.T) {
 		t.Fatalf("bound devices: %+v %v", bound, err)
 	}
 }
+
+// REQ-DEV-012: the legacy endpoints find a device by UUID or by name.
+func TestResolveByIDOrName(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := newTestService(t)
+	pc := create(t, s, "Gaming PC")
+	numeric := create(t, s, "42") // a numeric name is a name: there are no integer ids
+
+	for ref, want := range map[string]string{
+		pc.ID: pc.ID, "gaming pc": pc.ID, "  GAMING PC ": pc.ID, "42": numeric.ID,
+		strings.ToUpper(pc.ID): pc.ID, // a UUID in any case
+	} {
+		d, err := s.Resolve(ctx, ref)
+		if err != nil || d.ID != want {
+			t.Errorf("Resolve(%q) = %q, %v; want %q", ref, d.ID, err, want)
+		}
+	}
+	for _, ref := range []string{"", "  ", "nope", uuid.NewString(), "Gaming"} {
+		if _, err := s.Resolve(ctx, ref); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Resolve(%q): %v, want ErrNotFound", ref, err)
+		}
+	}
+}

@@ -158,13 +158,15 @@ func newRouter(d Deps) (http.Handler, error) {
 	h.Devices, h.Commands, h.Monitor, h.Audit = d.Devices, d.Commands, d.Monitor, d.Audit
 	h.ControllerKey, h.Activity = d.ControllerKey, d.Activity
 	h.DDNS, h.Metrics = d.DDNS, d.Metrics
+	throttle := middleware.NewDeviceThrottle(DeviceCommandInterval)
+	h.Throttle = throttle
 	h.Info = handlers.InfoSource{Mode: string(d.Mode), Controller: d.Config}
 	gen.HandlerWithOptions(h, gen.ChiServerOptions{
 		BaseRouter: r,
 		// The wrapper applies these in order, so the last is outermost: a request passes
 		// NotImplementedEnvelope, then Authorize, then the device throttle, then the handler.
 		Middlewares: []gen.MiddlewareFunc{
-			middleware.NewDeviceThrottle(DeviceCommandInterval).Middleware,
+			throttle.Middleware,
 			middleware.Authorize(policy, d.Authn, d.Log),
 			middleware.NotImplementedEnvelope,
 		},
