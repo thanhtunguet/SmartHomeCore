@@ -24,7 +24,7 @@
   automatically at Controller start. The README says so.
 - Rollback needs the pre-upgrade data backup: the migration runner has no downgrade and an older binary does not
   refuse a newer schema. This is documented in the archive README, not changed in code.
-- If `HomeCoreUI` is private, the repository needs a secret `SUBMODULE_TOKEN` (read access to that repo).
+- `.gitmodules` keeps the SSH URL. The `frontend` job rewrites `git@github.com:` to `https://github.com/` with `git config --global url.<https>.insteadOf` and runs `git submodule update --init`, so no key or token is needed. **`HomeCoreUI` must be public.**
 
 ## Verification
 - `scripts/package-backend.sh amd64|arm64 v0.0.0-test` run locally: both archives built, `file` shows a static

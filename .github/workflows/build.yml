@@ -3,10 +3,9 @@ name: Build
 # Builds the frontend (zip) and the Linux backend packages (amd64 + arm64).
 # Every run uploads the files as workflow artifacts. A tag `vX.Y.Z` also publishes them as a GitHub Release.
 #
-# The `frontend/` git submodule is git@github.com:thanhtunguet/HomeCoreUI.git. actions/checkout rewrites that
-# SSH URL to HTTPS and authenticates with `token`. If HomeCoreUI is private, add a repository secret
-# SUBMODULE_TOKEN (fine-grained PAT, "Contents: read" on HomeCoreUI); the default GITHUB_TOKEN cannot read
-# other private repositories.
+# The `frontend/` git submodule (HomeCoreUI, must be public) is declared in .gitmodules with an SSH URL.
+# CI does not change .gitmodules: the `frontend` job rewrites git@github.com: to https://github.com/ in its
+# own git config before fetching the submodule, so no SSH key or token is needed.
 
 on:
   push:
@@ -48,9 +47,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true # the commit pinned by the frontend gitlink
-          token: ${{ secrets.SUBMODULE_TOKEN || github.token }}
           persist-credentials: false
+      - name: Fetch the frontend submodule over HTTPS
+        run: |
+          # .gitmodules keeps the SSH URL; rewrite it for this runner only (the config is not committed).
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git submodule sync frontend
+          git submodule update --init frontend # the commit pinned by the gitlink
+          git submodule status frontend
+          test -f frontend/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22 # vite 8 needs >= 22.12
