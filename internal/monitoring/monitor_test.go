@@ -8,6 +8,7 @@ import (
 	"net"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -523,5 +524,73 @@ func TestFailureReason(t *testing.T) {
 	}
 	if (ProbeResult{Err: context.DeadlineExceeded}).FailureReason() != "timed out" {
 		t.Fatal("deadline")
+	}
+}
+
+type transitionRecorder struct {
+	mu  sync.Mutex
+	log *[]string // shared with the Observer so the order can be checked
+	got []Transition
+}
+
+func (r *transitionRecorder) DeviceTransitioned(_ context.Context, t Transition) {
+	r.mu.Lock()
+	r.got = append(r.got, t)
+	*r.log = append(*r.log, "transition:"+string(t.To))
+	r.mu.Unlock()
+}
+
+type orderObserver struct {
+	mu  *sync.Mutex
+	log *[]string
+}
+
+func (o orderObserver) DeviceObserved(_ context.Context, _ string, s devices.Status, _ time.Time) {
+	o.mu.Lock()
+	*o.log = append(*o.log, "observed:"+string(s))
+	o.mu.Unlock()
+}
+
+// REQ-ALERT-004: a TransitionObserver hears every status change, with where it came from, and hears
+// it before the Observer (the commands engine completes the command that explains the change).
+func TestTransitionObserverSeesChangesBeforeTheObserver(t *testing.T) {
+	var log []string
+	tr := &transitionRecorder{log: &log}
+	e := newEnv(t, func(c *Config) { c.Transitions = tr; c.Observer = orderObserver{&tr.mu, &log} })
+	ctx := context.Background()
+	d := e.add(t, "pc", "10.0.0.1", true)
+
+	e.prober.set("10.0.0.1", 22, true)
+	e.mon.CheckDue(ctx) // unknown → online
+	e.clock.Advance(31 * time.Second)
+	e.mon.CheckDue(ctx) // still online: no transition
+	e.prober.set("10.0.0.1", 22, false)
+	e.clock.Advance(31 * time.Second)
+	e.mon.CheckDue(ctx) // failure 1: hysteresis, no transition
+	e.clock.Advance(31 * time.Second)
+	e.mon.CheckDue(ctx) // failure 2 → offline
+
+	if len(tr.got) != 2 {
+		t.Fatalf("transitions: %+v", tr.got)
+	}
+	first, second := tr.got[0], tr.got[1]
+	if first.From != devices.StatusUnknown || first.To != devices.StatusOnline || first.Device.ID != d.ID || first.Device.Name != "pc" || first.Reason != "probe" {
+		t.Fatalf("first: %+v", first)
+	}
+	if second.From != devices.StatusOnline || second.To != devices.StatusOffline || second.At.IsZero() {
+		t.Fatalf("second: %+v", second)
+	}
+	want := []string{"transition:online", "observed:online", "transition:offline", "observed:offline"}
+	if !slices.Equal(log, want) {
+		t.Fatalf("order %v, want %v", log, want)
+	}
+
+	// A manual probe is an observation like any other and reports its reason.
+	e.prober.set("10.0.0.1", 22, true)
+	if _, err := e.mon.ProbeNow(ctx, d.ID); err != nil {
+		t.Fatal(err)
+	}
+	if last := tr.got[len(tr.got)-1]; last.To != devices.StatusOnline || last.Reason != "manual probe" {
+		t.Fatalf("manual probe: %+v", last)
 	}
 }

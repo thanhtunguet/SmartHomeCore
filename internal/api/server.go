@@ -18,6 +18,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/thanhtunguet/homecore/internal/activity"
+	"github.com/thanhtunguet/homecore/internal/alerts"
 	"github.com/thanhtunguet/homecore/internal/api/gen"
 	"github.com/thanhtunguet/homecore/internal/api/handlers"
 	"github.com/thanhtunguet/homecore/internal/api/middleware"
@@ -67,6 +68,8 @@ type Deps struct {
 
 	DDNS    *ddns.Service            // DDNS endpoints; nil answers 501
 	Metrics platform.MetricsProvider // GET /system/metrics; nil answers 501
+
+	Alerts *alerts.Service // alert channel endpoints; nil answers 501
 }
 
 // Server is the Controller HTTP server.
@@ -164,6 +167,7 @@ func newRouter(d Deps) (http.Handler, error) {
 	h.Devices, h.Commands, h.Monitor, h.Audit = d.Devices, d.Commands, d.Monitor, d.Audit
 	h.ControllerKey, h.Activity = d.ControllerKey, d.Activity
 	h.DDNS, h.Metrics = d.DDNS, d.Metrics
+	h.Alerts = d.Alerts
 	throttle := middleware.NewDeviceThrottle(DeviceCommandInterval)
 	h.Throttle = throttle
 	h.Info = handlers.InfoSource{Mode: string(d.Mode), Controller: d.Config}

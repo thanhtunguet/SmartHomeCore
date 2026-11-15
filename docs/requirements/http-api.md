@@ -5,7 +5,7 @@
 | Brief | §3.1, §4, §6 (public API zone) |
 | Code | `internal/api` (`server.go`, `middleware/`, `handlers/`, `gen/`), `api/openapi.yaml`, `web/`; authentication: [authentication.md](authentication.md) |
 | Design | [architecture §6.1, §9, §10](../design/architecture.md), [ADR-006](../design/decisions.md#adr-006--spec-first-rest-api), [ADR-008](../design/decisions.md#adr-008--offline-swagger-ui) |
-| Last updated | 2026-11-15 (MCP endpoint; earlier: 2026-11-14 service account keys; legacy device endpoints; local interface names; Phase 4: DDNS endpoints, Cloudflare lookups, system metrics; earlier: Phase 3 shutdown, controller key, activity feed, agent status) |
+| Last updated | 2026-11-15 (alert channel endpoints, REQ-API-032; MCP endpoint; earlier: 2026-11-14 service account keys; legacy device endpoints; local interface names; Phase 4: DDNS endpoints, Cloudflare lookups, system metrics; earlier: Phase 3 shutdown, controller key, activity feed, agent status) |
 | Status | **Implemented**: foundation, authentication, devices, commands (wake and shutdown), controller key, activity feed, DDNS (incl. Cloudflare lookups) and system metrics. No documented operation returns `501` any more |
 
 ## Functional requirements
@@ -42,6 +42,7 @@
 | REQ-API-030 | **Service account keys** (ADR-018): `POST /service-account-keys` (`201`), `GET /service-account-keys`, `DELETE /service-account-keys/{id}` (`204`), all session-only, and `POST /auth/service-key/rotate` (`200`, accepts `legacy` and `mcp` keys only, REQ-AUTH-024/025). Responses with a key are `Cache-Control: no-store`. Behaviour: [authentication.md](authentication.md) REQ-AUTH-021..027. | Implemented | `internal/api/servicekeys_test.go` (every response validated against the spec) |
 | REQ-API-031 | The rotate endpoint is under `/api/v1/auth/`, so the per-IP limit of the credential endpoints applies (10/min, burst 5, `429 rate_limited`). | Implemented | `TestServiceKeyRotationIsRateLimitedLikeLogin` |
 | REQ-API-022 | Accounts are managed by the `homecore user add\|passwd` command (Phase 1b), not by the API or the UI; there is no first-run bootstrap account. | Implemented (`homecore user add\|passwd\|list`, REQ-AUTH-015..018) | `TestUserAddPasswdListEndToEnd` |
+| REQ-API-032 | **Alert channels** (REQ-ALERT-*): `GET/POST /alerts/channels` (`201`), `GET/PATCH/DELETE /alerts/channels/{id}` (`DELETE` `204`), `POST /alerts/channels/{id}/test` (`200`, REQ-ALERT-009). Every operation needs a session token (a scoped service account key gets `403`: no `x-token-scopes`), is validated against the spec, and a duplicate name is `409`. The secret is `writeOnly`; `has_secret` replaces it. Changes are audited (REQ-ALERT-010). | Implemented | `api.TestAlertChannelCRUDOverHTTP`, `TestAlertEndpointsRequireAuthentication`, `TestAlertEndpointsRefuseScopedKeys`, `TestAlertChannelTestEndpoint`, `TestAlertChannelAudit` |
 | REQ-API-024 | `GET /api/v1/system/controller-key` (`getControllerKey`, any authenticated user) returns exactly `key_id`, `algorithm` (`ed25519`) and the base64 `public_key` of the active Controller key (REQ-SHD-001/002); never the private key. `401` without a token. | Implemented | `TestControllerKeyEndpoint`, `TestAgentTrustingTheAPIKeyAcceptsTheDispatcher` |
 
 ## Endpoint implementation status
@@ -67,6 +68,7 @@ The full contract (brief §4 plus additions) is in `api/openapi.yaml`.
 | `POST /api/v1/ddns/cloudflare/zones`, `POST /api/v1/ddns/cloudflare/zones/{zone_id}/records` | Implemented (Phase 4) |
 | `GET/POST /api/v1/service-account-keys`, `DELETE /api/v1/service-account-keys/{id}`, `POST /api/v1/auth/service-key/rotate` | Implemented (ADR-018) |
 | `POST /api/v1/mcp` | Implemented (ADR-020; [mcp.md](mcp.md)) |
+| `GET/POST /api/v1/alerts/channels`, `GET/PATCH/DELETE /api/v1/alerts/channels/{id}`, `POST /api/v1/alerts/channels/{id}/test` | Implemented (ADR-021; [alerts.md](alerts.md)) |
 
 ## Known gaps
 
@@ -145,3 +147,13 @@ will report them stale until the owner runs `npm run gen:api`. (Superseded the s
 `make generate` rewrote `internal/api/gen/api.gen.go`. The frontend's generated types
 (`frontend/src/api/generated`) were **not** regenerated (submodule untouched); `make ui-check-api` will report
 them stale until the owner regenerates them.
+
+## Spec change: alerts
+
+| Change | Why |
+|--------|-----|
+| New operations `listAlertChannels`, `createAlertChannel`, `getAlertChannel`, `updateAlertChannel`, `deleteAlertChannel`, `testAlertChannel`, a tag `alerts`, schemas `AlertChannel`, `AlertChannelCreate`, `AlertChannelUpdate`, `AlertChannelType`, `AlertEvent`, `AlertTestResult` and parameter `AlertChannelId` | REQ-API-032, REQ-ALERT-*, ADR-021. Additive; no existing operation changed |
+
+`make generate` rewrote `internal/api/gen/api.gen.go`. The frontend's generated types
+(`frontend/src/api/generated`) were **not** regenerated (submodule untouched); `make ui-check-api`
+reports them stale until the owner runs `npm run gen:api`.

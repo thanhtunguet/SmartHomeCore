@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | [`BRIEF.md`](../../BRIEF.md) (Technical Brief v0.1, Vietnamese) |
-| Last reviewed | 2026-11-15 (MCP server); 2026-11-14 (service account keys) |
+| Last reviewed | 2026-11-15 (alerts; MCP server); 2026-11-14 (service account keys) |
 | Owner | Project maintainers |
 
 This document turns the brief into the project's requirements baseline. It records which brief
@@ -60,6 +60,7 @@ One build supports both roles; configuration selects `controller`, `agent` or `b
 | Cloudflare DDNS | **Implemented** (Phase 4): public-IP quorum, Cloudflare client, sealed tokens, scheduled and manual sync with backoff, zone/record lookups, audit; not yet run against the real Cloudflare | [ddns.md](ddns.md) |
 | Legacy single-device API (added after the brief, not in it) | **Implemented**: `GET /api/turn-on\|turn-off\|is-online?device=`, long-lived scoped tokens (`homecore token create`), URLs in the device sheet (ADR-017) | [http-api.md](http-api.md) REQ-API-026..028, [authentication.md](authentication.md) REQ-AUTH-019/020 |
 | Service account keys (added after the brief, not in it) | **Implemented**: server-generated Ed25519 keys (private key sealed in the database), TTL default 1 year, scopes `legacy`/`mcp`, create/list/revoke by a user, self-rotation by the key with a 1-minute grace and idempotent retry, audit (ADR-018) | [authentication.md](authentication.md) REQ-AUTH-021..027, [http-api.md](http-api.md) REQ-API-029..031, [storage-and-secrets.md](storage-and-secrets.md) REQ-SEC-006 |
+| Alerts (added after the brief, not in it) | **Implemented**: alert channels with a Telegram adapter (bot token + target user id, sealed), events for a new public IP, wake/shutdown requests and a device that changes status outside HomeCore's control, delivery queue with retries, test endpoint, audit; not yet run against the real Telegram (ADR-021) | [alerts.md](alerts.md), [http-api.md](http-api.md) REQ-API-032, [storage-and-secrets.md](storage-and-secrets.md) REQ-SEC-007 |
 | Swagger UI at `/api/docs` | **Implemented** | [http-api.md](http-api.md) |
 | Static file serving | **Implemented** (UI embedded via `make build-full`; placeholder otherwise) | [http-api.md](http-api.md), [web-ui.md](web-ui.md) |
 
@@ -84,6 +85,7 @@ has a stable ID, a status and the test that verifies it.
 | [shutdown-agent.md](shutdown-agent.md) | `REQ-AG`, `REQ-SHD` | §3.5, §6 (agent zone, Controller key, shutdown dispatch) |
 | [ddns.md](ddns.md) | `REQ-DDNS`, `REQ-SYS` | §3.6 (DDNS), §3.8 (system metrics), §6.4 |
 | [mcp.md](mcp.md) | `REQ-MCP` | not in the brief: MCP server for AI agents (ADR-020) |
+| [alerts.md](alerts.md) | `REQ-ALERT` | not in the brief: alert channels and Telegram (ADR-021) |
 | [web-ui.md](web-ui.md) | `REQ-UI` | §3.1 (static frontend), UI for §3.3–3.6 |
 
 Status vocabulary used everywhere:

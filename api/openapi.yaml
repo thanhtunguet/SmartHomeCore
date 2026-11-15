@@ -52,6 +52,8 @@ tags:
   - name: system
   - name: activity
   - name: ddns
+  - name: alerts
+    description: Alert channels (Telegram, more later) that tell the owner about IP changes, power commands and unexpected device status changes.
   - name: service-keys
     description: Service account keys for legacy clients and AI agents (ADR-018).
   - name: legacy
@@ -738,6 +740,114 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/v1/alerts/channels:
+    get:
+      tags: [alerts]
+      operationId: listAlertChannels
+      summary: List alert channels
+      responses:
+        "200":
+          description: Alert channels, ordered by name
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AlertChannel" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [alerts]
+      operationId: createAlertChannel
+      summary: Add an alert channel
+      description: |
+        A channel is one destination for alerts, served by an adapter (`type`). Every adapter takes
+        non-secret `settings` (string values) and one `secret`, which is sealed at rest and never
+        returned. `telegram`: `settings.target_user_id` is the numeric Telegram user (or group) id
+        that receives the messages, `secret` is the bot token from BotFather. The target must have
+        started a chat with the bot first, or Telegram refuses to deliver.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AlertChannelCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AlertChannel" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/alerts/channels/{id}:
+    parameters:
+      - $ref: "#/components/parameters/AlertChannelId"
+    get:
+      tags: [alerts]
+      operationId: getAlertChannel
+      summary: Get one alert channel
+      responses:
+        "200":
+          description: The channel
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AlertChannel" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [alerts]
+      operationId: updateAlertChannel
+      summary: Update an alert channel (partial)
+      description: |
+        `type` cannot change. `settings`, when present, replaces all settings of the channel;
+        `events`, when present, replaces the subscription. The `secret` is changed only when given.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AlertChannelUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AlertChannel" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [alerts]
+      operationId: deleteAlertChannel
+      summary: Delete an alert channel
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/alerts/channels/{id}/test:
+    parameters:
+      - $ref: "#/components/parameters/AlertChannelId"
+    post:
+      tags: [alerts]
+      operationId: testAlertChannel
+      summary: Send a test message through a channel now
+      description: |
+        Works on a disabled channel too. A delivery that fails is a `200` with `result: failed` and
+        the reason in `error`, because the request itself worked (as for `syncDdnsConfig`).
+      responses:
+        "200":
+          description: Test result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AlertTestResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/turn-on:
     get:
       tags: [legacy, devices]
@@ -882,6 +992,11 @@ components:
       required: true
       schema: { type: string, format: uuid }
     DdnsId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    AlertChannelId:
       name: id
       in: path
       required: true
@@ -1471,6 +1586,83 @@ components:
         interval_seconds: { type: integer, minimum: 60, maximum: 86400 }
         enabled: { type: boolean }
         api_token: { type: string, writeOnly: true }
+
+    AlertEvent:
+      type: string
+      enum: [ip_changed, power_command, status_changed]
+      description: |
+        `ip_changed`: a DDNS record was moved to a new public IP address. `power_command`: a wake or
+        shutdown request was accepted (any client: UI, legacy endpoints, MCP). `status_changed`: a
+        monitored device went online or offline **without** a wake/shutdown command in progress,
+        for example the machine lost power or was switched on by hand.
+
+    AlertChannelType:
+      type: string
+      enum: [telegram]
+
+    AlertChannel:
+      type: object
+      required: [id, name, type, enabled, events, settings, has_secret, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        type: { $ref: "#/components/schemas/AlertChannelType" }
+        enabled: { type: boolean }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/AlertEvent" }
+        settings:
+          type: object
+          additionalProperties: { type: string }
+          description: "Non-secret adapter settings (`telegram`: `target_user_id`)."
+        has_secret: { type: boolean, description: The secret itself is never returned. }
+        last_sent_at: { type: string, format: date-time, description: Last successful delivery (including tests). }
+        last_error: { type: string, description: Reason of the last failed delivery; cleared by the next success. }
+        last_error_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    AlertChannelCreate:
+      type: object
+      required: [name, type, settings, secret]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        type: { $ref: "#/components/schemas/AlertChannelType" }
+        enabled: { type: boolean, default: true }
+        events:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/AlertEvent" }
+          description: Defaults to every event.
+        settings:
+          type: object
+          additionalProperties: { type: string }
+        secret: { type: string, writeOnly: true, minLength: 1, maxLength: 512, description: "`telegram`: the bot token." }
+
+    AlertChannelUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        enabled: { type: boolean }
+        events:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/AlertEvent" }
+        settings:
+          type: object
+          additionalProperties: { type: string }
+        secret: { type: string, writeOnly: true, minLength: 1, maxLength: 512 }
+
+    AlertTestResult:
+      type: object
+      required: [channel_id, result, sent_at]
+      properties:
+        channel_id: { type: string, format: uuid }
+        result: { type: string, enum: [sent, failed] }
+        sent_at: { type: string, format: date-time }
+        error: { type: string, description: Present when `result` is `failed`; never contains the secret. }
 
     CloudflareLookup:
       type: object

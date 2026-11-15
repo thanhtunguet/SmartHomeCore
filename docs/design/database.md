@@ -3,10 +3,10 @@
 | | |
 |---|---|
 | Engine | SQLite 3 (embedded) via `modernc.org/sqlite` (pure Go, [ADR-004](decisions.md#adr-004--sqlite-driver-moderncorgsqlite-everywhere)) |
-| Schema version | `7` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`, `0003_users_no_roles.sql`, `0004_refresh_grace.sql`, `0005_agent_status.sql`, `0006_ddns_state.sql`, `0007_service_account_keys.sql`) |
+| Schema version | `8` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`, `0003_users_no_roles.sql`, `0004_refresh_grace.sql`, `0005_agent_status.sql`, `0006_ddns_state.sql`, `0007_service_account_keys.sql`, `0008_alert_channels.sql`) |
 | Owner role | Controller only. The Agent has no database |
 | Requirements | [storage-and-secrets.md](../requirements/storage-and-secrets.md) |
-| Last reviewed | 2026-11-14 (service account keys: migration 0007; Phase 4: migration 0006, DDNS observed state and record uniqueness; earlier: Phase 3 migration 0005) |
+| Last reviewed | 2026-11-15 (alerts: migration 0008; earlier: 2026-11-14 service account keys: migration 0007; Phase 4: migration 0006, DDNS observed state and record uniqueness; earlier: Phase 3 migration 0005) |
 
 The DDL in `internal/storage/migrations/` is authoritative. This document explains it and must be
 updated in the same change as any new migration.
@@ -57,7 +57,7 @@ erDiagram
 ```
 
 Standalone tables: `audit_log` (references users/targets by value, so entries outlive deletions),
-`system_settings`, `schema_migrations`.
+`alert_channels`, `system_settings`, `schema_migrations`.
 
 Mapping from the brief's table list (§3.7):
 
@@ -72,6 +72,7 @@ Mapping from the brief's table list (§3.7):
 | `command_history` | `commands` | Lifecycle state machine, not just history |
 | `ddns_configs` | `ddns_configs` | |
 | `ddns_sync_history` | `ddns_sync_history` | |
+| — | `alert_channels` | Added (ADR-021): destinations for alerts (Telegram, ...) with their sealed secret |
 | `system_settings` | `system_settings` | |
 | — | `audit_log` | Added: brief §6 requires an audit log for shutdown |
 | — | `schema_migrations` | Added: migration bookkeeping |
@@ -254,6 +255,27 @@ Append-only record of security-relevant actions (login, shutdown, key rotation, 
 | `details` | TEXT | no | `'{}'` | JSON, never secrets |
 
 Index: `audit_log_at (at DESC)`.
+
+### alert_channels
+
+One alert destination per row (migration `0008`, [ADR-021](decisions.md#adr-021--alerts-channels-adapters-and-hooks-in-the-producers), [alerts.md](../requirements/alerts.md)).
+
+| Column | Type | Null | Default | Constraint / note |
+|--------|------|------|---------|-------------------|
+| `id` | TEXT | no | | PK, UUIDv7 |
+| `name` | TEXT | no | | length 1..100; unique ignoring case (index `alert_channels_name`) |
+| `type` | TEXT | no | | adapter name (`telegram`). **No `CHECK`**: the service validates it against the registered adapters, so a new adapter needs no migration |
+| `enabled` | INTEGER | no | `1` | bool |
+| `events` | TEXT | no | | JSON array of `ip_changed`, `power_command`, `status_changed` (canonical order), read as a whole |
+| `settings` | TEXT | no | `'{}'` | JSON object of non-secret string settings (telegram: `target_user_id`) |
+| `secret_sealed` | BLOB | no | | the adapter's one secret (telegram: the bot token), sealed, AAD `alert_channels.secret`; never returned |
+| `last_sent_at` | INTEGER | yes | | last successful delivery, tests included |
+| `last_error` | TEXT | no | `''` | reason of the last failed delivery (cut to 500 characters, never the secret); `''` after a success |
+| `last_error_at` | INTEGER | yes | | |
+| `created_at`, `updated_at` | INTEGER | no | | `updated_at` changes with edits only, never with a delivery |
+
+Writers: `alerts.Service` (create/update/delete, sealed secret) and the delivery path (`RecordDelivery`, which
+touches only the three `last_*` columns). Pruning: none (a few rows, edited by the owner).
 
 ### ddns_configs
 

@@ -801,3 +801,81 @@ func TestPruneSyncHistory(t *testing.T) {
 		t.Fatalf("pruning history must not touch configurations: %d", got)
 	}
 }
+
+type ipRecorder struct {
+	mu  sync.Mutex
+	got []IPChange
+}
+
+func (r *ipRecorder) IPChanged(_ context.Context, c IPChange) {
+	r.mu.Lock()
+	r.got = append(r.got, c)
+	r.mu.Unlock()
+}
+
+func (r *ipRecorder) all() []IPChange {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]IPChange(nil), r.got...)
+}
+
+// REQ-ALERT-002: the observer hears about a record moved to a new address, with the old and the new
+// one, and about nothing else: not an unchanged record, not a fix of the proxy flag or TTL, not a failure.
+func TestIPObserverHearsOnlyAboutAddressChanges(t *testing.T) {
+	e := newEnv(t)
+	rec := &ipRecorder{}
+	e.svc.obs = rec
+
+	c := e.mk("Home", "r1")
+	e.mustSync(c.ID) // 8.8.4.4 → 8.8.8.8
+	got := rec.all()
+	if len(got) != 1 {
+		t.Fatalf("after the first sync: %+v", got)
+	}
+	ch := got[0]
+	if ch.ConfigID != c.ID || ch.Name != "Home" || ch.RecordName != "home.example.com" || ch.RecordType != RecordA ||
+		ch.OldIP != "8.8.4.4" || ch.NewIP != "8.8.8.8" || !ch.At.Equal(e.clock.Now()) {
+		t.Fatalf("change: %+v", ch)
+	}
+
+	e.clock.Advance(time.Minute)
+	e.mustSync(c.ID) // unchanged
+	if n := len(rec.all()); n != 1 {
+		t.Fatalf("an unchanged record was announced: %d", n)
+	}
+
+	e.ip.set("8.8.4.5", nil)
+	e.clock.Advance(time.Minute)
+	e.mustSync(c.ID) // 8.8.8.8 → 8.8.4.5
+	if got = rec.all(); len(got) != 2 || got[1].OldIP != "8.8.8.8" || got[1].NewIP != "8.8.4.5" {
+		t.Fatalf("second change: %+v", got)
+	}
+
+	// Drift at Cloudflare corrected back to the detected address is a change of the record too.
+	r, _ := e.cf.Record(zone, "r1")
+	r.Content = "1.2.3.4"
+	e.cf.Set(zone, r)
+	e.mustSync(c.ID)
+	if got = rec.all(); len(got) != 3 || got[2].OldIP != "1.2.3.4" || got[2].NewIP != "8.8.4.5" {
+		t.Fatalf("drift: %+v", got)
+	}
+
+	// Only the proxy flag differs: the record is patched, the address is not new.
+	p := e.mk("Proxied", "r3", func(in *CreateInput) { in.Proxied, in.TTL = ptrOf(true), ptrOf(1) })
+	e.ip.set("8.8.4.4", nil) // r3 already holds 8.8.4.4
+	if res := e.mustSync(p.ID); res.Result != ResultUpdated {
+		t.Fatalf("setup: %+v", res)
+	}
+	if n := len(rec.all()); n != 3 {
+		t.Fatalf("a proxied/TTL fix was announced as an IP change: %+v", rec.all()[3:])
+	}
+
+	// A failed sync announces nothing.
+	e.ip.set("", errors.New("no quorum"))
+	if res := e.mustSync(c.ID); res.Result != ResultFailed {
+		t.Fatalf("%+v", res)
+	}
+	if n := len(rec.all()); n != 3 {
+		t.Fatalf("a failed sync was announced: %d", n)
+	}
+}

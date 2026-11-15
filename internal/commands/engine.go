@@ -60,11 +60,22 @@ type Prober interface {
 	Probe(ctx context.Context, deviceID string) (reachable bool, err error)
 }
 
+// IssueObserver is told about every command the Engine created and dispatched, whoever asked
+// (REST, the legacy endpoints, MCP): the command is in its post-dispatch state (sent, acknowledged
+// or failed). It is not called for a request answered with an already active command, nor for a
+// command born completed because the device was already in the target state. It runs on the
+// request's goroutine with the request's context (so the caller's principal is available) and must
+// be quick: queue and return. Alerts use it (REQ-ALERT-003).
+type IssueObserver interface {
+	CommandIssued(ctx context.Context, c Command, d devices.Device)
+}
+
 // Config configures an Engine.
 type Config struct {
 	Repo    Repository
 	Devices DeviceSource
-	Prober  Prober // optional
+	Prober  Prober        // optional
+	Issued  IssueObserver // optional
 	Log     *slog.Logger
 
 	WakeDeadline     time.Duration
@@ -175,7 +186,11 @@ func (e *Engine) Request(ctx context.Context, r Request) (Command, error) {
 		}
 		return Command{}, err
 	}
-	return e.dispatch(ctx, disp, c, dev)
+	out, err := e.dispatch(ctx, disp, c, dev)
+	if err == nil && e.cfg.Issued != nil {
+		e.cfg.Issued.CommandIssued(ctx, out, dev)
+	}
+	return out, err
 }
 
 // confirmTarget double-checks a stored "already in the target state" with one fresh probe, so a

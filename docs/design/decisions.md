@@ -630,3 +630,61 @@ because `service_account_keys.scope` has a CHECK on it). The endpoint does not v
 server-to-client notifications. The superseded clause of ADR-018 is "the MCP server itself is **not part of this
 repository**".
 
+---
+
+## ADR-021 — Alerts: channels, adapters and hooks in the producers
+
+**Context.** The owner wants to be told, on Telegram first and on other channels later, about: a new public
+IP (DDNS), a wake or shutdown request, and a machine that changes state outside HomeCore's control (seen online,
+then silent, or the reverse). Alerts are not in the brief and not in the MVP list of the scope guardrails;
+they are added at the owner's request. They must not weaken any security invariant, slow the monitor or the
+request path, or pull in a dependency.
+
+**Decision.**
+- **A new package, `internal/alerts`, with channels stored in the database.** A channel is a row of
+  `alert_channels` (migration `0008`): name, `type` (the adapter), `enabled`, `events`, flat string `settings`,
+  and **one** sealed `secret`. Channels are managed through the REST API (`/alerts/channels`, spec-first, session
+  token only), like DDNS configurations, not through the YAML file: the owner adds a Telegram target from the
+  UI, a token in a file would be plaintext, and the DDNS precedent already has the sealing and the audit.
+- **Adapters are a `Factory(settings, secret) (Adapter, error)` registered by `internal/app`**, where the factory
+  is also the validation. `Adapter` is one method, `Send(ctx, Message{Kind, Title, Body})`. The first adapter,
+  Telegram, takes exactly the two asked parameters: `secret` = bot token, `settings.target_user_id` = the
+  target. It talks to the Bot API `sendMessage` with the standard library (no SDK, no new dependency), plain
+  text only (no `parse_mode`, so a device name cannot break the message). One secret plus flat string
+  settings is enough for the adapters one can foresee (Discord/Slack webhook: the URL is the secret; email:
+  the password is the secret); an adapter that needs more would need an ADR.
+- **Hooks are observer interfaces owned by the producers and implemented in `internal/alerts`**:
+  `ddns.IPObserver` (in `Service.Sync`, so scheduler and manual sync alike), `commands.IssueObserver` (in
+  `Engine.Request`, so REST, legacy and MCP alike) and `monitoring.TransitionObserver`. The producers do not
+  import `alerts`; `app` wires. This keeps the dependency direction of the guardrails and puts each hook where
+  the fact is known exactly once.
+- **Three events** a channel can subscribe to (default: all): `ip_changed`, `power_command`, `status_changed`.
+- **"Out of control" is decided by the active command.** A status transition is reported unless a command that
+  explains it is in progress (wake explains `online`, shutdown explains `offline`). The monitor calls the
+  transition hook **before** the commands engine (the Observer) completes the command, which is the one
+  ordering this relies on. First sightings (`unknown`) and disabled devices are not reported. We reuse the
+  monitor's hysteresis instead of adding a second debounce.
+- **Delivery is asynchronous and best effort.** `Notify` queues (64 entries, in memory) and returns; one
+  `Run(ctx)` consumer delivers in order, to the channels in parallel, with up to three attempts (1 s, 5 s) on
+  temporary failures (network, `429`, `5xx`), and stores the outcome on the channel (`last_sent_at`,
+  `last_error`). A full queue drops the new alert; a stop loses the queue.
+- **The secret never leaves.** Sealed with AAD `alert_channels.secret`, write-only in the API (`has_secret`),
+  out of the audit log and the logs. The Bot API puts the token in the URL, so the Telegram adapter removes the
+  URL from transport errors and scrubs the token from the replies it quotes.
+- **Audit** `alert_channel.create|update|delete|test` with the acting user and field names only; the alerts
+  themselves are not audited.
+
+**Alternatives considered.** *Channels in the YAML config*: plaintext token, restart to change, no UI path. *A
+telegram-specific table and endpoint*: the next adapter would repeat it. *Alert from the audit log* (poll
+`audit_log` for `device.wake`, `ddns.sync`): misses the monitor's transitions, delivers late, and ties alerts to
+what happens to be audited. *A persistent outbox with replay*: an alert about the moment loses its value when
+replayed later, and it adds a table and a job for a home-sized system. *A message broker*: excluded by the
+guardrails and unnecessary for one consumer. *Parsing markup (MarkdownV2/HTML)*: escaping rules make a device
+named `NAS_1` a delivery error.
+
+**Consequences.** One more table and one more `errgroup` member. The three producers each gained an optional
+observer and still work without one. Alerts are lost across a Controller restart and during a Telegram outage
+longer than the retries; a Controller that is down cannot alert about itself. A device that bounces produces a
+message per change (no flap suppression beyond hysteresis). Messages are English. The frontend has no
+screen yet and its generated types are stale until regenerated. A live run against Telegram has not been done.
+

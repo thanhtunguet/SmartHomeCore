@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/thanhtunguet/homecore/internal/activity"
+	"github.com/thanhtunguet/homecore/internal/alerts"
 	"github.com/thanhtunguet/homecore/internal/api/gen"
 	"github.com/thanhtunguet/homecore/internal/api/middleware"
 	"github.com/thanhtunguet/homecore/internal/audit"
@@ -55,6 +56,8 @@ type Handlers struct {
 	// Phase 4.
 	DDNS    *ddns.Service            // DDNS configurations, Cloudflare lookups, manual sync (nil: 501)
 	Metrics platform.MetricsProvider // GET /system/metrics (nil: 501)
+
+	Alerts *alerts.Service // alert channels (nil: 501)
 }
 
 var _ gen.ServerInterface = (*Handlers)(nil)

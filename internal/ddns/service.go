@@ -36,8 +36,27 @@ type ServiceConfig struct {
 	Sealer *secrets.Sealer
 	DNS    DNSProvider
 	IP     IPDiscoverer
-	Now    func() time.Time // nil = time.Now
-	Log    *slog.Logger     // nil = slog.Default()
+	// Observer, if set, is told when a sync moves a record to a new address (alerts, REQ-ALERT-002).
+	Observer IPObserver
+	Now      func() time.Time // nil = time.Now
+	Log      *slog.Logger     // nil = slog.Default()
+}
+
+// IPChange describes a record that a sync moved to a new address.
+type IPChange struct {
+	ConfigID   string
+	Name       string // the configuration's name
+	RecordName string
+	RecordType RecordType
+	OldIP      string // what the record held before ('' if it was empty)
+	NewIP      string
+	At         time.Time
+}
+
+// IPObserver is told about address changes. It is called on the goroutine that ran the sync (the
+// scheduler or an API request), after the outcome was stored, so it must be quick: queue and return.
+type IPObserver interface {
+	IPChanged(ctx context.Context, c IPChange)
 }
 
 // Service implements DDNS configuration management, the Cloudflare lookups for the form dropdowns
@@ -47,6 +66,7 @@ type Service struct {
 	sealer *secrets.Sealer
 	dns    DNSProvider
 	ip     IPDiscoverer
+	obs    IPObserver
 	now    func() time.Time
 	log    *slog.Logger
 	locks  keyedMutex
@@ -54,7 +74,7 @@ type Service struct {
 
 // NewService returns a Service.
 func NewService(c ServiceConfig) *Service {
-	s := &Service{repo: c.Repo, sealer: c.Sealer, dns: c.DNS, ip: c.IP, now: c.Now, log: c.Log}
+	s := &Service{repo: c.Repo, sealer: c.Sealer, dns: c.DNS, ip: c.IP, obs: c.Observer, now: c.Now, log: c.Log}
 	if s.now == nil {
 		s.now = time.Now
 	}
@@ -416,6 +436,11 @@ func (s *Service) Sync(ctx context.Context, id string) (SyncResult, error) {
 	if !applied {
 		s.log.Info("ddns: configuration changed during a sync, result not stored", "config_id", id)
 	}
+	// The record was moved at Cloudflare whether or not the result could be stored, so say so.
+	if s.obs != nil && out.Result == ResultUpdated && out.IPChanged {
+		s.obs.IPChanged(ctx, IPChange{ConfigID: id, Name: cfg.Name, RecordName: cfg.RecordName,
+			RecordType: cfg.RecordType, OldIP: out.PreviousIP, NewIP: out.IP, At: out.At})
+	}
 	return SyncResult{ConfigID: id, Result: out.Result, IP: out.IP, Error: out.Error, At: out.At, Cause: cause}, nil
 }
 
@@ -443,7 +468,8 @@ func (s *Service) syncRecord(ctx context.Context, token string, cfg Config, out 
 	}
 
 	want := RecordUpdate{Content: ip, Proxied: cfg.Proxied, TTL: cfg.TTL}
-	if cur, ok := parseContent(rec.Content); ok && cur == ip && rec.Proxied == want.Proxied && rec.TTL == want.TTL {
+	cur, curOK := parseContent(rec.Content)
+	if curOK && cur == ip && rec.Proxied == want.Proxied && rec.TTL == want.TTL {
 		out.Result = ResultUnchanged
 		return nil
 	}
@@ -453,6 +479,9 @@ func (s *Service) syncRecord(ctx context.Context, token string, cfg Config, out 
 	}
 	out.Result = ResultUpdated
 	out.DNSValue = updated.Content
+	if !curOK || cur != ip {
+		out.IPChanged, out.PreviousIP = true, rec.Content
+	}
 	return nil
 }
 

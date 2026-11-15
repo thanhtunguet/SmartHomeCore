@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1 |
-| Last reviewed | 2026-11-15 (MCP server, ADR-020; earlier: portable Agent, ADR-019; earlier: 2026-11-14 service account keys; legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
+| Last reviewed | 2026-11-15 (alerts, ADR-021; earlier: MCP server, ADR-020; earlier: portable Agent, ADR-019; earlier: 2026-11-14 service account keys; legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
 | Requirements | [requirements/overview.md](../requirements/overview.md) |
 | Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs) |
 | API contract | [api/openapi.yaml](../../api/openapi.yaml) (source of truth) |
@@ -143,6 +143,7 @@ internal/
   activity/              read-only activity feed over audit_log (`GET /activity`)
   controllerkey/         Controller Ed25519 key: generate, seal, load (`LoadOrCreate`), sign
   agentctl/              Controller-side client of the Agent: shutdown Dispatcher, health job
+  alerts/                alert channels, adapters (Telegram), delivery queue, the hooks that connect ddns / commands / monitoring (ADR-021)
   devices/               device model, validation, repository
   monitoring/            TCP probe, hysteresis, scheduler job, status history
   wol/                   magic packet build/send, MAC parsing, broadcast resolution
@@ -255,6 +256,10 @@ Fields (see `devices` table): `id`, `name`, `description`, `hostname`, `ip_addre
   on every status transition and on every observation of a device with an active command, on the
   probing goroutine (it must be quick). `app` connects the two with `SetObserver` before `Run`
   (this breaks the construction cycle monitor ↔ engine).
+- **Transition hook** (`monitoring.TransitionObserver`, set with `SetTransitionObserver`): told about every
+  status change with the device, `From`, `To` and the reason, **before** the Observer, so the alert hook
+  (§6.12) can still see the wake/shutdown command that explains the change; the engine completes that
+  command right after. Same rules as the Observer: probing goroutine, must be quick.
 
 ### 6.4 Wake-on-LAN (`internal/wol`)
 - Magic packet: 6 × `0xFF` + 16 × MAC (102 bytes), UDP to broadcast:9 (configurable).
@@ -296,6 +301,10 @@ Fields (see `devices` table): `id`, `name`, `description`, `hostname`, `ip_addre
 - Every state change is a compare-and-set (`Update(id, from, change)`), so the monitor, the deadline
   job and a request cannot overwrite each other; transitions are validated by `Transition`.
 - Handlers write `audit_log` (`device.wake`, `device.shutdown`) for each accepted request.
+- **Issue hook** (`commands.IssueObserver`, `Config.Issued`): called by `Request` after a command it created
+  was dispatched (post-dispatch state: sent, acknowledged or failed), on the request's goroutine with its
+  context, so the principal is available. Not called for an idempotent repeat or a command born completed.
+  Alerts use it (§6.12), which covers REST, the legacy endpoints and MCP at once.
 
 ### 6.5a Shutdown dispatch and agent status (`internal/agentctl`, `internal/controllerkey`)
 - **Controller key** (`controllerkey.LoadOrCreate`): one Ed25519 key, generated on first start in a
@@ -349,6 +358,9 @@ POST /ddns/{id}/sync                                                      ┴─
   (`POST /ddns/cloudflare/zones`, `.../zones/{zone_id}/records`), are stored by id, and the Controller
   never resolves a record by name. A sync that finds a record whose type or name no longer matches
   fails without writing.
+- **IP hook** (`ddns.IPObserver`, `ServiceConfig.Observer`): `Service.Sync` (so the scheduler and the manual
+  endpoint alike) calls `IPChanged` with the old and new address when it moved the record to a different
+  address (not for a proxy/TTL-only fix), after the outcome was stored. Alerts use it (§6.12).
 - Multiple records (one configuration per Cloudflare record); `A` and `AAAA` (AAAA asks for an IPv6
   address); per-config interval (60 s to 24 h); manual `POST /ddns/{id}/sync`, same code path.
 - Retry with exponential backoff (1 s → 5 min cap, jittered to 50..100 %, never longer than the
@@ -397,6 +409,40 @@ adds `local_addresses` while preserving the legacy `local_ips` list. Implemented
 `scheduler.Every(ctx, interval, jitter, fn)` — a ticker loop with jitter and panic recovery. No cron
 expressions, no persistence; jobs re-derive their work from the DB on each tick.
 
+### 6.12 Alerts (`internal/alerts`)
+Implemented ([requirements/alerts.md](../requirements/alerts.md), [ADR-021](decisions.md#adr-021--alerts-channels-adapters-and-hooks-in-the-producers)).
+
+```
+ddns.Service.Sync ──IPChanged──────────────▶ alerts.IPHook ───────┐
+commands.Engine.Request ──CommandIssued────▶ alerts.CommandHook ──┤  Service.Notify(Message)   non-blocking, 64-entry queue
+monitoring.Monitor ──DeviceTransitioned────▶ alerts.StatusHook ───┘      │   (StatusHook asks commands.Repository.Active
+   (before the engine completes commands)                                  │    whether a command explains the change)
+                                                                           ▼
+                                   Service.Run (one consumer, in order) ─▶ channels: enabled, subscribed to the event
+                                                                           ▼  in parallel, up to 3 attempts (1 s, 5 s) on temporary errors
+                                   Factory(settings, secret) ─▶ Adapter.Send ─▶ Telegram sendMessage
+                                                                           ▼
+                                   repo.RecordDelivery: last_sent_at | last_error, last_error_at
+```
+
+- **Channel** = `alert_channels` row: name, `type` (the adapter), `enabled`, `events`, flat string
+  `settings` and one sealed `secret`. CRUD and the test message are `Service` methods behind
+  `handlers_alerts.go`.
+- **Adapter contract**: `Adapter.Send(ctx, Message{Kind, Title, Body})` and a `Factory(settings, secret)` that
+  both validates and builds. `internal/app` registers the factories; Telegram is `TelegramFactory`
+  (settings `target_user_id`, secret = bot token, plain text, 4096-character cut, no redirects). A new
+  adapter is one file plus the registration (REQ-ALERT-011).
+- **Hooks live in `internal/alerts`**, implementing observer interfaces defined by the producer
+  (`ddns.IPObserver`, `commands.IssueObserver`, `monitoring.TransitionObserver`), so `ddns`, `commands` and
+  `monitoring` do not import `alerts`; dependency direction stays handlers → alerts → domain, and only `app`
+  wires them.
+- **"Outside HomeCore's control"** (`StatusHook`): an online↔offline transition with no active command of the
+  explaining type (wake explains online, shutdown explains offline); first sightings and disabled devices are
+  skipped. It relies on the hook order described in §6.3.
+- **Failure model**: producers never wait and never fail because of alerts; a full queue drops the new alert;
+  the queue is lost on stop. Secrets: the bot token is sealed, write-only, and kept out of errors (the Bot API
+  URL contains it, so the adapter strips URLs and scrubs replies).
+
 ---
 
 ## 7. Data model (SQLite)
@@ -404,9 +450,9 @@ expressions, no persistence; jobs re-derive their work from the DB on each tick.
 Full specification (tables, columns, constraints, indexes, conventions, migration process):
 **[database.md](database.md)**. Authoritative DDL: `internal/storage/migrations/`.
 
-Summary: 12 STRICT tables in four groups. **Identity**: `users`, `refresh_tokens`. **Devices**:
+Summary: 13 STRICT tables in five groups. **Identity**: `users`, `refresh_tokens`, `service_account_keys`. **Devices**:
 `devices`, `agent_bindings`, `device_status_history`. **Operations**: `commands`, `audit_log`,
-`controller_keys`. **DDNS and settings**: `ddns_configs`, `ddns_sync_history`, `system_settings`.
+`controller_keys`. **DDNS and settings**: `ddns_configs`, `ddns_sync_history`, `system_settings`. **Alerts**: `alert_channels`.
 `schema_migrations` belongs to the migration runner. The brief's `agent_credentials` is split into
 `agent_bindings` (per device) and `controller_keys` (per Controller), because with Ed25519 the
 secret material belongs to the Controller, not the device.
@@ -480,6 +526,7 @@ Namespace `/api/v1`; full contract in `api/openapi.yaml`. Summary (brief §4, pl
 | GET/POST | `/api/v1/ddns` | user |
 | ✚PATCH/DELETE | `/api/v1/ddns/{id}` | user |
 | POST | `/api/v1/ddns/{id}/sync` | user |
+| ✚GET/POST | `/api/v1/alerts/channels` · ✚GET/PATCH/DELETE `/alerts/channels/{id}` · ✚POST `/alerts/channels/{id}/test` | user (session only; scoped keys get `403`) |
 | ✚POST | `/api/v1/ddns/cloudflare/zones` · `/ddns/cloudflare/zones/{zone_id}/records` | user; read-only lookups for the form dropdowns (`POST` so the token stays out of URLs) |
 | GET | `/healthz`, `/readyz`, `/api/openapi.json`, `/api/docs` | public |
 
@@ -512,7 +559,7 @@ Principles:
 1. Agent never executes arbitrary commands; actions are an enum.
 2. Agent listener is LAN-only; remote access via VPN (WireGuard/Tailscale), never port-forwarded.
 3. Separate keys: JWT signing key ≠ Controller signing key ≠ master key.
-4. No plaintext secrets in the DB; no secrets in API responses or logs.
+4. No plaintext secrets in the DB; no secrets in API responses or logs (the alert channel's bot token included).
 5. Shutdown writes `audit_log` `device.shutdown` (with the acting user). Wake/shutdown are throttled per device (ADR-012).
 6. Accounts are created and re-passworded with the `homecore user add|passwd|list` command (§10.1);
    there is no default account and no password in the log. Android: the host app will call the same

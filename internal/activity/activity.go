@@ -252,6 +252,17 @@ func message(r Raw, d details) string {
 		return ddnsSyncMessage(d, failed)
 	case "controller_key.create":
 		return "Controller signing key created" + suffix(" (key_id ", d.KeyID, ")")
+	case "alert_channel.create":
+		return "Alert channel " + firstNonEmpty(d.Name, "a channel") + " created"
+	case "alert_channel.update":
+		return "Alert channel " + firstNonEmpty(d.Name, "a channel") + " updated"
+	case "alert_channel.delete":
+		return "Alert channel " + firstNonEmpty(d.Name, "a channel") + " deleted"
+	case "alert_channel.test":
+		if failed {
+			return "Test message to alert channel " + firstNonEmpty(d.Name, "a channel") + " failed"
+		}
+		return "Test message sent to alert channel " + firstNonEmpty(d.Name, "a channel")
 	}
 	return r.Action
 }

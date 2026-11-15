@@ -5,6 +5,7 @@ that spans days uses its end date). Newest entries are listed first below.
 
 | Date | Entry | Summary |
 |------|-------|---------|
+| 2026-11-15 | [2026-11-15-alerts.md](2026-11-15-alerts.md) | Alerts (ADR-021): channels with a Telegram adapter (bot token + target user id, sealed), events for a new public IP, wake/shutdown requests and a status change outside HomeCore's control, queue with retries, test endpoint, migration `0008` |
 | 2026-11-15 | [2026-11-15-mcp-server.md](2026-11-15-mcp-server.md) | MCP server in the Controller (`POST /api/v1/mcp`, ADR-020): tools `list_devices`, `get_devices`, `control_device` (turn_on, turn_off, check_status), authenticated by any service account key, no per-tool permission |
 | 2026-11-15 | [2026-11-15-confirm-dialogs.md](2026-11-15-confirm-dialogs.md) | `window.confirm` replaced by a shared modal `ConfirmDialog` (4 places); device cards show a disabled Power off button instead of "Pwr n/a" |
 | 2026-11-15 | [2026-11-15-device-status-section.md](2026-11-15-device-status-section.md) | Device sheet: three action buttons replaced by a "Device Status" section with Power on / Power off (state-dependent) and a refresh icon button |

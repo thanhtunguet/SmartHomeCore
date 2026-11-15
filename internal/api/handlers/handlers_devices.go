@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/thanhtunguet/homecore/internal/activity"
+	"github.com/thanhtunguet/homecore/internal/alerts"
 	"github.com/thanhtunguet/homecore/internal/api/gen"
 	"github.com/thanhtunguet/homecore/internal/api/middleware"
 	"github.com/thanhtunguet/homecore/internal/audit"
@@ -346,6 +347,7 @@ func (h *Handlers) apiError(w http.ResponseWriter, r *http.Request, op string, e
 	var verr *devices.ValidationError
 	var dverr *ddns.ValidationError
 	var cferr *ddns.CloudflareError
+	var averr *alerts.ValidationError
 	switch {
 	case errors.Is(err, errUnauthenticated):
 		httpx.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
@@ -359,6 +361,12 @@ func (h *Handlers) apiError(w http.ResponseWriter, r *http.Request, op string, e
 		httpx.WriteError(w, http.StatusBadRequest, "bad_request", err.Error())
 	case errors.Is(err, ddns.ErrNotFound):
 		httpx.WriteError(w, http.StatusNotFound, "not_found", "ddns configuration not found")
+	case errors.As(err, &averr):
+		httpx.WriteError(w, http.StatusBadRequest, "bad_request", averr.Error())
+	case errors.Is(err, alerts.ErrNotFound):
+		httpx.WriteError(w, http.StatusNotFound, "not_found", "alert channel not found")
+	case errors.Is(err, alerts.ErrNameTaken):
+		httpx.WriteError(w, http.StatusConflict, "conflict", err.Error())
 	case errors.Is(err, devices.ErrNotFound):
 		httpx.WriteError(w, http.StatusNotFound, "not_found", "device not found")
 	case errors.Is(err, commands.ErrNotFound):

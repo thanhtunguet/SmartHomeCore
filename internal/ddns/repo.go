@@ -54,6 +54,12 @@ type Outcome struct {
 	IP       string // detected public address; '' when discovery failed
 	DNSValue string // record content as read or written; '' when it could not be read
 	Error    string // failed only; never contains the token
+
+	// IPChanged is set when the sync moved the record to a different address (not when only the
+	// proxy flag or TTL was fixed); PreviousIP is the content the record had ('' if it was empty).
+	// Neither is persisted: they feed IPObserver.
+	IPChanged  bool
+	PreviousIP string
 }
 
 // Repository is the storage the DDNS service needs.

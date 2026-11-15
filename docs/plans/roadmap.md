@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | Brief §7 (phases), §8 (MVP); [architecture](../design/architecture.md) |
-| Last updated | 2026-11-15 (MCP server; earlier: 2026-11-14 service account keys; legacy endpoints; build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
+| Last updated | 2026-11-15 (alerts; earlier: MCP server; earlier: 2026-11-14 service account keys; legacy endpoints; build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
 
 Legend: `[x]` done and verified · `[~]` partially done · `[ ]` not started.
 Tick items in the same change that completes them, and add a changelog entry.
@@ -139,6 +139,16 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [ ] Decide whether to remove the now redundant `mcp` scope and its REST allowlist (needs a migration)
 - [ ] Regenerate the frontend's API types (`make ui-check-api` is stale until then; submodule)
 
+## Alerts (ADR-021)
+
+- [x] Migration `0008` (`alert_channels`), `internal/alerts`: channels with sealed secret, events, delivery queue with retries, outcome stored on the channel (REQ-ALERT-001, 006..008)
+- [x] Telegram adapter: bot token + target user id (REQ-ALERT-005)
+- [x] Hooks: new public IP (`ddns.Service.Sync`), wake/shutdown requests (`commands.Engine.Request`), device status change outside HomeCore's control (`monitoring` transition hook) (REQ-ALERT-002..004)
+- [x] `/alerts/channels` CRUD and `/test` in the spec and the handlers, audited (REQ-API-032, REQ-ALERT-009/010)
+- [ ] Run once against the real Telegram: BotFather bot, `/start` from the target, add the channel, press test (everything so far ran against `alertstest`)
+- [ ] UI: Settings card for alert channels (list, add Telegram with token + user id, events, enable, test button, `last_error`), and regenerate the frontend's API types (`make ui-check-api` is stale; submodule)
+- [ ] More adapters (the owner said "later"): each is one `Factory` plus a spec enum value (REQ-ALERT-011)
+
 ## Phase 5 — Android integration
 
 - [ ] Kotlin lifecycle wrapper (foreground service, boot receiver, restart recovery)
@@ -182,6 +192,8 @@ Tick items in the same change that completes them, and add a changelog entry.
 | ~~Release pipeline must run `make ui-build` before `make cross`~~ done for Linux amd64/arm64 in `.github/workflows/build.yml`; remains for the other `make cross` targets | GAP-INF-10 |
 | Persist the monitor's consecutive-failure counters across restarts (today only the status survives) | REQ-MON-004 known gap |
 | Shorten the deadline sweep (5 s) or complete deadline exactly via a timer, if second-level accuracy of `timed_out` ever matters | REQ-CMD-006 |
+| Alerts not asked for yet: DDNS sync that keeps failing, command timed out/completed, agent became `unreachable`; flap suppression and quiet hours; Vietnamese or templated messages; an alert history instead of only `last_*` | REQ-ALERT known gaps |
+| Persist undelivered alerts across a restart (outbox), only if losing them ever matters | ADR-021, REQ-ALERT-007 |
 | Endpoint for `ddns_sync_history` (the UI sees only the `last_*` fields and the activity feed) | REQ-DDNS known gaps |
 | Sub-tick backoff (the syncer ticks every 5 s, so a 1 s retry waits for the next tick); make the tick a config key if it matters | REQ-DDNS known gaps |
 | ~~Revoke one legacy token~~ solved for new integrations by service account keys (ADR-018); the HS256 legacy tokens still die only with their account. `homecore user disable\|enable\|delete` is still missing (set `disabled` with SQL) | ADR-017, ADR-018, REQ-AUTH-020 |

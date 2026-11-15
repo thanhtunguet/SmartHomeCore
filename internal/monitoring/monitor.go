@@ -26,6 +26,23 @@ type Observer interface {
 	DeviceObserved(ctx context.Context, deviceID string, status devices.Status, at time.Time)
 }
 
+// Transition is a change of a device's observed status after hysteresis (never the very first
+// observation of a device that was `unknown`: that is a discovery, and the From says so).
+type Transition struct {
+	Device devices.Device // as stored when the probe ran
+	From   devices.Status
+	To     devices.Status
+	At     time.Time
+	Reason string // "probe" (the tick) or "manual probe"
+}
+
+// TransitionObserver is told about every status transition, before the Observer, so it can still see
+// the wake/shutdown command that explains the change (the commands engine, the Observer, completes it).
+// It runs on the probing goroutine, so it must be quick. Alerts use it (REQ-ALERT-004).
+type TransitionObserver interface {
+	DeviceTransitioned(ctx context.Context, t Transition)
+}
+
 // ProbeFunc makes one TCP connect attempt (Probe is the real one; tests inject fakes).
 type ProbeFunc func(ctx context.Context, host string, port int, timeout time.Duration) ProbeResult
 
@@ -33,8 +50,11 @@ type ProbeFunc func(ctx context.Context, host string, port int, timeout time.Dur
 type Config struct {
 	Store    Store
 	Observer Observer // optional; may also be set with SetObserver before Run
-	Probe    ProbeFunc
-	Log      *slog.Logger
+	// Transitions is told about every status transition; optional, may also be set with
+	// SetTransitionObserver before Run.
+	Transitions TransitionObserver
+	Probe       ProbeFunc
+	Log         *slog.Logger
 
 	Tick             time.Duration // how often due devices are selected (controller.monitor.tick)
 	Concurrency      int           // worker pool size (controller.monitor.concurrency)
@@ -97,6 +117,9 @@ func New(cfg Config) *Monitor {
 // SetObserver sets the Observer. Call it during wiring, before Run (it breaks the construction
 // cycle between the monitor and the commands engine).
 func (m *Monitor) SetObserver(o Observer) { m.cfg.Observer = o }
+
+// SetTransitionObserver sets the TransitionObserver. Call it during wiring, before Run.
+func (m *Monitor) SetTransitionObserver(o TransitionObserver) { m.cfg.Transitions = o }
 
 // Run checks due devices at once and then on every tick, until ctx is cancelled. Probes in flight
 // are cancelled with ctx and not recorded.
@@ -256,6 +279,9 @@ func (m *Monitor) observe(ctx context.Context, st *deviceState, dev devices.Devi
 
 	if changed {
 		m.cfg.Log.Info("device status changed", "device", dev.ID, "name", dev.Name, "from", prev, "to", status)
+	}
+	if changed && m.cfg.Transitions != nil {
+		m.cfg.Transitions.DeviceTransitioned(ctx, Transition{Device: dev, From: prev, To: status, At: at, Reason: reason})
 	}
 	if m.cfg.Observer != nil && (changed || notify) {
 		m.cfg.Observer.DeviceObserved(ctx, dev.ID, status, at)

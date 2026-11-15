@@ -686,3 +686,70 @@ func TestWakeDispatcherSendsARealMagicPacket(t *testing.T) {
 		t.Fatalf("mac in packet: %x", buf[6:12])
 	}
 }
+
+type issuedRecorder struct {
+	mu  sync.Mutex
+	got []Command
+	dev []string
+}
+
+func (r *issuedRecorder) CommandIssued(_ context.Context, c Command, d devices.Device) {
+	r.mu.Lock()
+	r.got, r.dev = append(r.got, c), append(r.dev, d.Name)
+	r.mu.Unlock()
+}
+
+func (r *issuedRecorder) statuses() []Status {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]Status, len(r.got))
+	for i, c := range r.got {
+		out[i] = c.Status
+	}
+	return out
+}
+
+// REQ-ALERT-003: the IssueObserver hears about a command that was really created and dispatched,
+// once, in its post-dispatch state, and about nothing else.
+func TestIssueObserverHearsOnlyAboutNewDispatchedCommands(t *testing.T) {
+	e := newEnv(t, nil)
+	rec := &issuedRecorder{}
+	e.eng = NewEngine(Config{
+		Repo: e.repo, Devices: e.devs, Issued: rec, Now: e.clock.Now,
+		Log:          slog.New(slog.NewTextHandler(io.Discard, nil)),
+		WakeDeadline: 180 * time.Second, ShutdownDeadline: 120 * time.Second,
+	})
+	e.eng.Register(TypeWake, WakeDispatcher{Sender: e.sender})
+	d := e.device(t, "pc", "aa:bb:cc:dd:ee:ff")
+
+	first := e.wake(t, d.ID)
+	if got := rec.statuses(); len(got) != 1 || got[0] != StatusSent || rec.got[0].ID != first.ID || rec.dev[0] != "pc" {
+		t.Fatalf("after the first request: %v", got)
+	}
+	if again := e.wake(t, d.ID); again.ID != first.ID {
+		t.Fatalf("not idempotent: %+v", again)
+	}
+	if got := rec.statuses(); len(got) != 1 {
+		t.Fatalf("a request answered with the active command was announced again: %v", got)
+	}
+
+	// Already online: the command is born completed and nothing was sent, so there is nothing to announce.
+	other := e.device(t, "tv", "aa:bb:cc:dd:ee:01")
+	e.setStatus(t, other.ID, devices.StatusOnline)
+	if c := e.wake(t, other.ID); c.Status != StatusCompleted {
+		t.Fatalf("%+v", c)
+	}
+	if got := rec.statuses(); len(got) != 1 {
+		t.Fatalf("a no-op command was announced: %v", got)
+	}
+
+	// A dispatch that failed is announced too, as failed.
+	e.sender.err = errors.New("network is unreachable")
+	third := e.device(t, "nas", "aa:bb:cc:dd:ee:02")
+	if c := e.wake(t, third.ID); c.Status != StatusFailed {
+		t.Fatalf("%+v", c)
+	}
+	if got := rec.statuses(); len(got) != 2 || got[1] != StatusFailed || rec.got[1].ErrorCode != ErrCodeWOLSend {
+		t.Fatalf("after a failed dispatch: %v", got)
+	}
+}

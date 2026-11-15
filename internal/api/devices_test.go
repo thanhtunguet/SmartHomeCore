@@ -21,6 +21,8 @@ import (
 
 	"github.com/thanhtunguet/homecore/internal/activity"
 	"github.com/thanhtunguet/homecore/internal/agentctl"
+	"github.com/thanhtunguet/homecore/internal/alerts"
+	"github.com/thanhtunguet/homecore/internal/alerts/alertstest"
 	"github.com/thanhtunguet/homecore/internal/api/gen"
 	"github.com/thanhtunguet/homecore/internal/audit"
 	"github.com/thanhtunguet/homecore/internal/auth"
@@ -61,6 +63,11 @@ type devEnv struct {
 	ddnsSvc *ddns.Service
 	metrics *swapMetrics
 	logs    *logBuffer
+
+	// Alerts: the real service against a fake Telegram Bot API. Its delivery loop runs for the
+	// length of the test.
+	alerts *alerts.Service
+	tg     *alertstest.Telegram
 
 	mu      sync.Mutex
 	up      map[int]bool // monitor_port → reachable
@@ -159,7 +166,17 @@ func newDevEnvOpts(t *testing.T, mutate func(*config.Controller), realProbe bool
 		t.Fatal(err)
 	}
 	e.ip = &scriptedIP{v4: "8.8.8.8", v6: "2606:4700:4700::1111"}
-	e.ddnsSvc = ddns.NewService(ddns.ServiceConfig{Repo: ddns.NewSQLiteRepository(db), Sealer: sealer, DNS: cfClient, IP: e.ip, Log: log})
+	e.tg = alertstest.New(t, tgTestToken)
+	e.alerts = alerts.NewService(alerts.ServiceConfig{
+		Repo: alerts.NewSQLiteRepository(db), Sealer: sealer, Log: log, RetryDelays: []time.Duration{},
+		Adapters: map[string]alerts.Factory{alerts.TypeTelegram: alerts.TelegramFactory(e.tg.URL(), nil)},
+	})
+	alertsCtx, stopAlerts := context.WithCancel(ctx)
+	alertsDone := make(chan struct{})
+	go func() { defer close(alertsDone); _ = e.alerts.Run(alertsCtx) }()
+	t.Cleanup(func() { stopAlerts(); <-alertsDone })
+	e.ddnsSvc = ddns.NewService(ddns.ServiceConfig{Repo: ddns.NewSQLiteRepository(db), Sealer: sealer, DNS: cfClient, IP: e.ip,
+		Observer: alerts.IPHook{Svc: e.alerts}, Log: log})
 	e.metrics = &swapMetrics{p: &system.Cached{Provider: system.NewGopsutil(system.GopsutilConfig{DataDir: t.TempDir(), Started: time.Now()}), TTL: time.Second}}
 	devRepo := devices.NewSQLiteRepository(db)
 	devSvc := devices.NewService(devRepo, nil)
@@ -175,8 +192,10 @@ func newDevEnvOpts(t *testing.T, mutate func(*config.Controller), realProbe bool
 		}
 	}
 	e.mon = monitoring.New(monCfg)
+	cmdRepo := commands.NewSQLiteRepository(db)
+	e.mon.SetTransitionObserver(alerts.StatusHook{Svc: e.alerts, Commands: cmdRepo, Log: log})
 	e.engine = commands.NewEngine(commands.Config{
-		Repo: commands.NewSQLiteRepository(db), Devices: devSvc, Prober: engineProber{e.mon}, Log: log,
+		Repo: cmdRepo, Devices: devSvc, Prober: engineProber{e.mon}, Log: log, Issued: alerts.CommandHook{Svc: e.alerts},
 		WakeDeadline: cfg.Commands.WakeDeadline, ShutdownDeadline: cfg.Commands.ShutdownDeadline,
 	})
 	e.engine.Register(commands.TypeWake, commands.WakeDispatcher{Sender: wakeRecorder{e}})
@@ -192,6 +211,7 @@ func newDevEnvOpts(t *testing.T, mutate func(*config.Controller), realProbe bool
 		Config: cfg, Log: log, DB: db, Auth: authSvc, ServiceKeys: keySvc,
 		Devices: devSvc, Commands: e.engine, Monitor: e.mon, Audit: writer,
 		ControllerKey: key, Activity: activity.NewService(db), DDNS: e.ddnsSvc, Metrics: e.metrics,
+		Alerts: e.alerts,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -13,6 +13,7 @@ import (
 	"github.com/thanhtunguet/homecore/internal/activity"
 	"github.com/thanhtunguet/homecore/internal/agent"
 	"github.com/thanhtunguet/homecore/internal/agentctl"
+	"github.com/thanhtunguet/homecore/internal/alerts"
 	"github.com/thanhtunguet/homecore/internal/api"
 	"github.com/thanhtunguet/homecore/internal/audit"
 	"github.com/thanhtunguet/homecore/internal/auth"
@@ -127,8 +128,13 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 		OfflineThreshold: cfg.Controller.Monitor.OfflineThreshold,
 	})
 	cmdRepo := commands.NewSQLiteRepository(db)
+	alertSvc := alerts.NewService(alerts.ServiceConfig{
+		Repo: alerts.NewSQLiteRepository(db), Sealer: sealer, Log: log.With("component", "alerts"),
+		Adapters: map[string]alerts.Factory{alerts.TypeTelegram: alerts.TelegramFactory("", nil)},
+	})
 	engine := commands.NewEngine(commands.Config{
 		Repo:             cmdRepo,
+		Issued:           alerts.CommandHook{Svc: alertSvc},
 		Devices:          devSvc,
 		Prober:           monitorProber{mon},
 		Log:              log.With("component", "commands"),
@@ -141,6 +147,9 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 	})
 	health := agentctl.NewHealth(agentctl.HealthConfig{Store: devRepo, Log: log.With("component", "agent-health")})
 	mon.SetObserver(engine) // the monitor completes wake/shutdown commands through the engine
+	// Alert on a status change nobody asked for. Told before the engine completes the command that
+	// would explain it (see alerts.StatusHook).
+	mon.SetTransitionObserver(alerts.StatusHook{Svc: alertSvc, Commands: cmdRepo, Log: log.With("component", "alerts")})
 	prune := retention.New(retention.Config{
 		Days: cfg.Controller.RetentionDays,
 		Log:  log.With("component", "retention"),
@@ -165,7 +174,8 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 	}
 	ddnsSvc := ddns.NewService(ddns.ServiceConfig{
 		Repo: ddns.NewSQLiteRepository(db), Sealer: sealer, DNS: cloudflare, IP: discoverer,
-		Log: log.With("component", "ddns"),
+		Observer: alerts.IPHook{Svc: alertSvc},
+		Log:      log.With("component", "ddns"),
 	})
 	syncer := ddns.NewSyncer(ddns.SyncerConfig{Service: ddnsSvc, Audit: auditWriter, Log: log.With("component", "ddns")})
 	// Metrics: gopsutil where the OS allows it (a metric it cannot read is reported as restricted),
@@ -191,6 +201,7 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 		Activity:        activity.NewService(db),
 		DDNS:            ddnsSvc,
 		Metrics:         metrics,
+		Alerts:          alertSvc,
 	})
 	if err != nil {
 		return err
@@ -198,12 +209,13 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return srv.Run(gctx) })
-	g.Go(func() error { return authSvc.Run(gctx) }) // refresh-token housekeeping
-	g.Go(func() error { return mon.Run(gctx) })     // TCP probes, status persistence
-	g.Go(func() error { return engine.Run(gctx) })  // command recovery and deadlines
-	g.Go(func() error { return prune.Run(gctx) })   // retention_days pruning
-	g.Go(func() error { return health.Run(gctx) })  // agent status (healthz) once a minute
-	g.Go(func() error { return syncer.Run(gctx) })  // Cloudflare DDNS
+	g.Go(func() error { return authSvc.Run(gctx) })  // refresh-token housekeeping
+	g.Go(func() error { return mon.Run(gctx) })      // TCP probes, status persistence
+	g.Go(func() error { return engine.Run(gctx) })   // command recovery and deadlines
+	g.Go(func() error { return prune.Run(gctx) })    // retention_days pruning
+	g.Go(func() error { return health.Run(gctx) })   // agent status (healthz) once a minute
+	g.Go(func() error { return syncer.Run(gctx) })   // Cloudflare DDNS
+	g.Go(func() error { return alertSvc.Run(gctx) }) // alert delivery (Telegram, ...)
 	return g.Wait()
 }
 
