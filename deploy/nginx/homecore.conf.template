@@ -1,0 +1,147 @@
+# HomeCore: nginx reverse proxy + static frontend.
+#
+#   /          static frontend (Vite build, SPA fallback to index.html)
+#   /api/      proxied to the Controller (REST, Swagger UI, legacy /api/turn-on etc.), WebSocket-ready
+#   /healthz, /readyz   proxied to the Controller
+#
+# Variables (substitute with envsubst, only these three, so nginx's own $variables stay intact):
+#   SERVER_NAME   host name served, e.g. home.example.com (or "_" for any)
+#   WEB_ROOT      directory holding the built frontend (index.html + assets/), e.g. /var/www/homecore
+#   BACKEND_ADDR  Controller listen address, e.g. 127.0.0.1:8080
+#
+#   export SERVER_NAME=home.example.com WEB_ROOT=/var/www/homecore BACKEND_ADDR=127.0.0.1:8080
+#   envsubst '${SERVER_NAME} ${WEB_ROOT} ${BACKEND_ADDR}' \
+#       < deploy/nginx/homecore.conf.template | sudo tee /etc/nginx/conf.d/homecore.conf
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# Docker: mount this file as /etc/nginx/templates/homecore.conf.template and set the three variables in
+# the container environment (the official image runs envsubst at start and writes conf.d/homecore.conf).
+#
+# This file is included inside nginx's `http {}` block (conf.d/*.conf), so it may hold http-level
+# directives (map, upstream, gzip). Remove the `gzip*` lines if your nginx.conf already sets them.
+#
+# Controller side: set `controller.trusted_proxies` to the proxy's address (e.g. ["127.0.0.1/32"]) in
+# homecore.yaml, otherwise every client appears as the proxy and shares one rate-limit bucket.
+
+# --- WebSocket upgrade --------------------------------------------------------------------------------
+# "upgrade" when the client asks for it; empty otherwise so upstream keep-alive connections stay reusable.
+map $http_upgrade $homecore_connection_upgrade {
+    default upgrade;
+    ''      '';
+}
+
+upstream homecore_backend {
+    server ${BACKEND_ADDR};
+    keepalive 16;
+}
+
+# --- Compression --------------------------------------------------------------------------------------
+# text/html is always compressed. woff/woff2/images are already compressed: not listed on purpose.
+gzip              on;
+gzip_vary         on;
+gzip_proxied      any;       # also compress proxied API responses
+gzip_comp_level   5;
+gzip_min_length   1024;
+gzip_types
+    text/plain
+    text/css
+    text/javascript
+    application/javascript
+    application/json
+    application/manifest+json
+    application/xml
+    image/svg+xml
+    image/x-icon;
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${SERVER_NAME};
+
+    # TLS: terminate here for anything beyond a trusted LAN (the API carries JWTs). Replace the two listen
+    # lines above with the following, add a separate port-80 server that redirects to https, then reload.
+    #   listen 443 ssl; listen [::]:443 ssl; http2 on;
+    #   ssl_certificate     /etc/letsencrypt/live/${SERVER_NAME}/fullchain.pem;
+    #   ssl_certificate_key /etc/letsencrypt/live/${SERVER_NAME}/privkey.pem;
+    #   add_header Strict-Transport-Security "max-age=31536000" always;
+
+    root ${WEB_ROOT};
+    index index.html;
+
+    # Matches the Controller's own limit (1 MiB) so oversized bodies are rejected at the edge.
+    client_max_body_size 1m;
+
+    # Security headers, same policy the Controller sends with its embedded UI. nginx does not inherit
+    # add_header into a location that defines its own add_header, so the static locations below repeat
+    # them: keep those copies in sync with this block.
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'" always;
+
+    # --- API + WebSocket ------------------------------------------------------------------------------
+    # No URI part on proxy_pass: the request path is forwarded unchanged (/api/v1/... stays /api/v1/...).
+    # Response caching headers come from the Controller; nginx adds none and caches nothing here.
+    # ^~ stops the regex location below (static file extensions) from taking over /api/*.png etc.
+    location ^~ /api/ {
+        proxy_pass http://homecore_backend;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $homecore_connection_upgrade;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+
+        # WebSocket connections idle between messages: keep them open for an hour. Plain requests are
+        # bounded by the Controller's own 30 s handler timeout, so this does not slow failure detection.
+        proxy_connect_timeout 5s;
+        proxy_send_timeout    3600s;
+        proxy_read_timeout    3600s;
+    }
+
+    # Liveness / readiness (public by design); handy for load balancers and uptime checks.
+    location = /healthz { proxy_pass http://homecore_backend; proxy_set_header Host $host; access_log off; }
+    location = /readyz  { proxy_pass http://homecore_backend; proxy_set_header Host $host; access_log off; }
+
+    # --- Static frontend ------------------------------------------------------------------------------
+    # Vite emits content-hashed files under /assets/: safe to cache for a year and never revalidate.
+    # A missing hashed file must be a real 404, not index.html (a stale tab would then parse HTML as JS).
+    # ^~ so the extension regex below cannot override the long-lived cache headers.
+    location ^~ /assets/ {
+        try_files $uri =404;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "no-referrer" always;
+        access_log off;
+    }
+
+    # The entry point is not hashed: always revalidate (ETag/Last-Modified) so a deploy shows up at once.
+    location = /index.html {
+        add_header Cache-Control "no-cache" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'" always;
+    }
+
+    # Other root files (favicon, manifest, robots.txt): unhashed, change rarely.
+    location ~* \.(?:ico|png|svg|webmanifest|txt)$ {
+        try_files $uri =404;
+        add_header Cache-Control "public, max-age=3600" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "no-referrer" always;
+        access_log off;
+    }
+
+    # SPA fallback: any other path is a client-side route and gets index.html (served as no-cache).
+    # Unknown /api/ paths never reach here: the /api/ location above answers them (JSON 404 from the Controller).
+    location / {
+        try_files $uri /index.html;
+    }
+}

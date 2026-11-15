@@ -58,3 +58,25 @@ sudo -u homecore homecore key show --config /etc/homecore/homecore.yaml
 Notes
 - Distros with polkit < 0.106 (old Debian/Ubuntu) need an equivalent `.pkla` file instead of JS rules.
 - Keep the agent port closed to the Internet (firewall to the LAN / VPN subnet).
+
+## nginx in front of the Controller (optional)
+
+[nginx/homecore.conf.template](nginx/homecore.conf.template) serves the built frontend (the `web/static`
+output or the release frontend zip) and proxies `/api/`, `/healthz` and `/readyz` to the Controller:
+
+- Frontend: gzip for text types; `/assets/*` (content-hashed) cached for 1 year + `immutable`, `index.html`
+  `no-cache`, other root files 1 hour; SPA fallback to `index.html`; a missing `/assets/*` file is a real 404.
+- `/api/`: forwards `Host`, `X-Forwarded-*`; sends `Upgrade`/`Connection` only for WebSocket handshakes
+  (upstream keep-alive otherwise); 1 h read timeout so idle sockets survive.
+- Security headers mirror the Controller's (`nosniff`, `DENY`, CSP without `font-src data:`).
+
+```bash
+export SERVER_NAME=home.example.com WEB_ROOT=/var/www/homecore BACKEND_ADDR=127.0.0.1:8080
+envsubst '${SERVER_NAME} ${WEB_ROOT} ${BACKEND_ADDR}' < deploy/nginx/homecore.conf.template \
+  | sudo tee /etc/nginx/conf.d/homecore.conf
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Set `controller.trusted_proxies: ["127.0.0.1/32"]` (the proxy's address) in `homecore.yaml`, otherwise rate
+limiting sees every client as the proxy. The Controller has no WebSocket endpoint yet (MVP scope); the proxy
+is ready for one. Add TLS (commented block in the template) before exposing it beyond a trusted LAN.
