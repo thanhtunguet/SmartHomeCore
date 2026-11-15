@@ -92,11 +92,12 @@ func operationsAllowing(p Policy, scope string) []string {
 }
 
 // The legacy scope (HS256 legacy tokens, ADR-017, and legacy service account keys, ADR-018) is
-// accepted on exactly the three old endpoints plus the key's own rotation.
+// accepted on exactly the three old endpoints, the key's own rotation and the MCP endpoint, which
+// takes any service account key whatever its scope (ADR-020).
 func TestPolicyMarksTheLegacyOperationsOnly(t *testing.T) {
 	p := realPolicy(t)
 	got := operationsAllowing(p, auth.ScopeLegacy)
-	want := []string{"GET /api/is-online", "GET /api/turn-off", "GET /api/turn-on", "POST /api/v1/auth/service-key/rotate"}
+	want := []string{"GET /api/is-online", "GET /api/turn-off", "GET /api/turn-on", "POST /api/v1/auth/service-key/rotate", "POST /api/v1/mcp"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("legacy operations: %v, want %v", got, want)
 	}

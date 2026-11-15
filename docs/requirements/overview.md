@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | [`BRIEF.md`](../../BRIEF.md) (Technical Brief v0.1, Vietnamese) |
-| Last reviewed | 2026-11-14 (service account keys) |
+| Last reviewed | 2026-11-15 (MCP server); 2026-11-14 (service account keys) |
 | Owner | Project maintainers |
 
 This document turns the brief into the project's requirements baseline. It records which brief
@@ -83,6 +83,7 @@ has a stable ID, a status and the test that verifies it.
 | [storage-and-secrets.md](storage-and-secrets.md) | `REQ-ST`, `REQ-SEC` | §3.7, §6 (secrets) |
 | [shutdown-agent.md](shutdown-agent.md) | `REQ-AG`, `REQ-SHD` | §3.5, §6 (agent zone, Controller key, shutdown dispatch) |
 | [ddns.md](ddns.md) | `REQ-DDNS`, `REQ-SYS` | §3.6 (DDNS), §3.8 (system metrics), §6.4 |
+| [mcp.md](mcp.md) | `REQ-MCP` | not in the brief: MCP server for AI agents (ADR-020) |
 | [web-ui.md](web-ui.md) | `REQ-UI` | §3.1 (static frontend), UI for §3.3–3.6 |
 
 Status vocabulary used everywhere:

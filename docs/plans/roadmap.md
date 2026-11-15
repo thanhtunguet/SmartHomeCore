@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | Brief §7 (phases), §8 (MVP); [architecture](../design/architecture.md) |
-| Last updated | 2026-11-14 (service account keys; legacy endpoints; build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
+| Last updated | 2026-11-15 (MCP server; earlier: 2026-11-14 service account keys; legacy endpoints; build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
 
 Legend: `[x]` done and verified · `[~]` partially done · `[ ]` not started.
 Tick items in the same change that completes them, and add a changelog entry.
@@ -129,8 +129,15 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [x] Audit and retention (REQ-AUTH-027)
 - [x] UI card for keys in Settings: list, create (name, scope, TTL), one-time key panel, revoke (REQ-UI-023/024; frontend submodule, commit it in HomeCoreUI and bump the pointer)
 - [ ] `homecore` subcommand to create a key without the API (bootstrap on a headless box)
-- [ ] The MCP server that consumes `mcp` keys (a separate project)
-- [ ] Review the `mcp` allowlist with a real agent (is `shutdownDevice` something an agent should hold?)
+
+## MCP server (ADR-020)
+
+- [x] `internal/mcp` (JSON-RPC 2.0, `initialize`, `ping`, `tools/list`, `tools/call`), `POST /api/v1/mcp` in the spec, authenticated by any service account key (REQ-MCP-001..003)
+- [x] Tools `list_devices`, `get_devices`, `control_device` (`turn_on`, `turn_off`, `check_status`) with the REST throttle and audit (REQ-MCP-004..013)
+- [ ] Try it with a real MCP client (Claude Code, Claude Desktop, MCP Inspector) and a real agent-bound machine
+- [ ] Per-key permissions, if wanted: today any key may turn any device on and off (REQ-MCP known gaps)
+- [ ] Decide whether to remove the now redundant `mcp` scope and its REST allowlist (needs a migration)
+- [ ] Regenerate the frontend's API types (`make ui-check-api` is stale until then; submodule)
 
 ## Phase 5 — Android integration
 

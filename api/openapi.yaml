@@ -12,12 +12,14 @@ info:
       accept the long-lived, legacy-scoped tokens of `homecore token create`; such a token is refused
       (`403`) on every other operation (ADR-017).
     * **Service account keys** (ADR-018) are long-lived, revocable credentials for the legacy endpoints
-      and for AI agents (MCP servers). A user creates one with `POST /service-account-keys` (session
+      and for AI agents. A user creates one with `POST /service-account-keys` (session
       token required); the response carries the key once, to be sent as `Authorization: Bearer <key>`.
       A key has a **scope**: `legacy` (the three legacy operations) or `mcp` (device control and
       read-only monitoring). Operations list the scopes they accept in `x-token-scopes`; a scoped
       key is refused (`403`) everywhere else, and key management is never open to a key. A key
       replaces itself with `POST /auth/service-key/rotate`.
+    * **MCP server** (ADR-020): `POST /api/v1/mcp` lets an AI agent list devices, read one and turn it
+      on or off. It accepts any valid service account key, whatever its scope.
     * Wake/shutdown return `202 Accepted` with a command; poll `GET /api/v1/commands/{id}` for the outcome.
     * Wake/shutdown are **idempotent** and **fail fast**: repeating one has the effect of sending it
       once and is never an error (see each operation). At most **one wake/shutdown request per device
@@ -54,6 +56,8 @@ tags:
     description: Service account keys for legacy clients and AI agents (ADR-018).
   - name: legacy
     description: Three GET endpoints for apps written before multi-device support (ADR-017).
+  - name: mcp
+    description: MCP server for AI agents, authenticated with a service account key (ADR-020).
 
 paths:
   /healthz:
@@ -807,6 +811,57 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/mcp:
+    post:
+      tags: [mcp]
+      operationId: callMcp
+      x-token-scopes: [legacy, mcp]
+      summary: MCP server for AI agents (Streamable HTTP, JSON-RPC 2.0)
+      description: |
+        The Controller's Model Context Protocol endpoint (ADR-020). An MCP client connects to this URL
+        and authenticates with a **service account key** (`Authorization: Bearer <key>`); a session
+        token is refused with `403`. Any valid key is accepted whatever its scope: there is no
+        per-tool permission.
+
+        The transport is stateless Streamable HTTP without server-sent events: each `POST` carries one
+        JSON-RPC 2.0 message (batches are not supported) and, for a request, is answered with
+        `application/json`. Notifications and client responses are answered `202` with no body.
+        `GET` and `DELETE` are `405`.
+
+        Methods: `initialize`, `ping`, `tools/list`, `tools/call`. Tools:
+
+        * `list_devices`: every device with its current status.
+        * `get_devices`: one device, by id or name.
+        * `control_device`: `action` is `turn_on` (Wake-on-LAN), `turn_off` (signed shutdown through the
+          device's agent) or `check_status` (probe now). Same rules as the REST operations: idempotent,
+          asynchronous, at most one power request per device per second, audited with the key's
+          owner and key id.
+
+        Errors in a tool call (unknown device, device cannot be powered, throttled) are returned as a
+        tool result with `isError: true`, so the agent can read them; protocol errors are JSON-RPC
+        errors. Request and response bodies are defined by the MCP specification, not by this
+        document.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: The JSON-RPC response to a request (a result or an error object).
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "202":
+          description: A notification or a client response was accepted; there is no body.
+        "400":
+          description: The body is not valid JSON or not a single JSON-RPC message. The body is a JSON-RPC error object.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
 components:
   securitySchemes:

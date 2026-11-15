@@ -5,7 +5,7 @@
 | Brief | §3.1 (JWT), §6 (public API zone, secrets), §6.6 |
 | Code | `internal/auth` (`password.go`, `jwt.go`, `service.go`, `store.go`, `accounts.go`), `internal/audit`, `internal/api/handlers/handlers_auth.go`, `cmd/homecore/user.go`, `cmd/homecore/token.go`, `internal/auth/clienttoken.go`, `internal/servicekey`, `internal/api/handlers/handlers_servicekeys.go`, `internal/platform/tty`, migrations `0004`, `0007` |
 | Design | [architecture §10.1](../design/architecture.md#101-authentication-design), [database.md](../design/database.md) (`users`, `refresh_tokens`, `system_settings`, `audit_log`), [ADR-011](../design/decisions.md#adr-011--no-roles-every-authenticated-user-is-equal), [ADR-013](../design/decisions.md#adr-013--authentication-implementation-argon2id-stdlib-hs256-jwt-refresh-grace-window), [ADR-018](../design/decisions.md#adr-018--service-account-keys-server-generated-ed25519-keys-scoped-individually-revocable-and-self-rotating) |
-| Last updated | 2026-11-14 (Phase 1b; legacy client tokens; service account keys) |
+| Last updated | 2026-11-15 (MCP endpoint accepts any key; earlier: Phase 1b; legacy client tokens; service account keys) |
 | Status | **Implemented** |
 
 No roles: every authenticated user is equal (ADR-011). Accounts are created with the
@@ -63,7 +63,7 @@ No roles: every authenticated user is equal (ADR-011). Accounts are created with
 
 ## Service account keys
 
-For the legacy endpoints and AI agents (an MCP server). Design and trade-offs: ADR-018. Endpoints:
+For the legacy endpoints and AI agents. The Controller's own MCP endpoint accepts any valid key whatever its scope ([mcp.md](mcp.md), ADR-020). Design and trade-offs: ADR-018. Endpoints:
 REQ-API-030. A key belongs to a user, who creates it with a session token; actions are attributed to
 that user.
 
@@ -82,7 +82,7 @@ that user.
 - The HS256 legacy tokens of `homecore token create` still cannot be revoked on their own (disabling the account still needs SQL, no `user disable` command); service account keys (above) are the individually revocable replacement. Rotating the JWT signing key revokes every token and session.
 - A service account key is a bearer secret with no proof of possession, no per-device and no per-IP restriction (ADR-018). For `RotationGrace` after a rotation a stolen old key can fetch the new key.
 - Keys are managed in the Settings screen of the web UI (REQ-UI-023/024) or with the API; there is no `homecore` subcommand for them yet. No cap on the number of keys per user, no "rotate by id" for a user (create a new key and revoke the old one).
-- The MCP server that consumes `mcp` keys is not part of this repository.
+- A key of any scope may use the MCP endpoint (REQ-MCP-003), so the scope no longer confines a `legacy` key to the legacy URLs there.
 
 - No `user disable|enable|delete` command: `users.disabled` is honoured everywhere (REQ-AUTH-006/007/008) but can only be set with SQL for now. Tracked in the roadmap backlog.
 - Logout and password change do not invalidate access tokens already issued (up to 15 min); only refresh tokens are revoked.

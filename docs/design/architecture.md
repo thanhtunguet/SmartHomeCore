@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1 |
-| Last reviewed | 2026-11-15 (portable Agent, ADR-019; earlier: 2026-11-14 service account keys; legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
+| Last reviewed | 2026-11-15 (MCP server, ADR-020; earlier: portable Agent, ADR-019; earlier: 2026-11-14 service account keys; legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
 | Requirements | [requirements/overview.md](../requirements/overview.md) |
 | Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs) |
 | API contract | [api/openapi.yaml](../../api/openapi.yaml) (source of truth) |
@@ -609,7 +609,7 @@ Long-lived credentials for legacy clients and AI agents, next to the session tok
 ```mermaid
 sequenceDiagram
     participant U as User (session token)
-    participant A as Agent / MCP server
+    participant A as AI agent / client
     participant C as Controller
     U->>C: POST /service-account-keys {name, scope, ttl}
     C->>C: generate Ed25519 pair, seal private key in the DB
@@ -632,6 +632,35 @@ sequenceDiagram
   row when a rotation is retried, never stored.
 - Dependency direction: handlers → `servicekey` → `auth` (types), `secrets`, `storage`, `audit`.
   `auth` does not import `servicekey`; the router wiring is in `api.New` and `internal/app`.
+
+### 10.3 MCP server (`internal/mcp`, ADR-020)
+
+The Controller is an MCP server for AI agents at `POST /api/v1/mcp`: stateless Streamable HTTP, JSON only
+(no SSE, no sessions). Requirements: [mcp.md](../requirements/mcp.md).
+
+```mermaid
+sequenceDiagram
+    participant A as AI agent (MCP client)
+    participant R as Router + Authorize
+    participant H as handlers.CallMcp
+    participant M as internal/mcp.Server
+    participant S as devices / commands / monitoring
+    A->>R: POST /api/v1/mcp  Authorization: Bearer key
+    R->>R: verify key (any scope) or 401
+    R->>H: principal in context
+    H->>H: refuse a non-key principal (403)
+    H->>M: Handle(body) with tools bound to this request
+    M->>S: tools/call → Resolve, requestWake / requestShutdown, ProbeNow
+    S-->>M: device or command
+    M-->>A: 200 JSON-RPC result (tool errors have isError: true)
+```
+
+- `internal/mcp` is stdlib only and generic: `Server{Tools}`, `Tool{Call}`, `Handle(ctx, body) (status, body)`. It
+  has no idea of devices or keys.
+- `handlers_mcp.go` builds the three tools **per request**, as closures over the request, and reuses
+  `requestWake`, `requestShutdown`, `Devices.Resolve`, `Monitor.ProbeNow` and the shared `DeviceThrottle`, so
+  throttle, idempotency and audit are those of REST and the legacy endpoints (audit `via: mcp`, `service_key_id`).
+- There is no permission check beyond authentication: any valid key may call every tool.
 
 ---
 

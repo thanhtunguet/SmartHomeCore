@@ -5,7 +5,7 @@
 | Brief | §3.1, §4, §6 (public API zone) |
 | Code | `internal/api` (`server.go`, `middleware/`, `handlers/`, `gen/`), `api/openapi.yaml`, `web/`; authentication: [authentication.md](authentication.md) |
 | Design | [architecture §6.1, §9, §10](../design/architecture.md), [ADR-006](../design/decisions.md#adr-006--spec-first-rest-api), [ADR-008](../design/decisions.md#adr-008--offline-swagger-ui) |
-| Last updated | 2026-11-14 (service account keys; legacy device endpoints; local interface names; Phase 4: DDNS endpoints, Cloudflare lookups, system metrics; earlier: Phase 3 shutdown, controller key, activity feed, agent status) |
+| Last updated | 2026-11-15 (MCP endpoint; earlier: 2026-11-14 service account keys; legacy device endpoints; local interface names; Phase 4: DDNS endpoints, Cloudflare lookups, system metrics; earlier: Phase 3 shutdown, controller key, activity feed, agent status) |
 | Status | **Implemented**: foundation, authentication, devices, commands (wake and shutdown), controller key, activity feed, DDNS (incl. Cloudflare lookups) and system metrics. No documented operation returns `501` any more |
 
 ## Functional requirements
@@ -66,6 +66,7 @@ The full contract (brief §4 plus additions) is in `api/openapi.yaml`.
 | `GET/POST /api/v1/ddns`, `PATCH/DELETE /api/v1/ddns/{id}`, `POST /api/v1/ddns/{id}/sync` | Implemented (Phase 4) |
 | `POST /api/v1/ddns/cloudflare/zones`, `POST /api/v1/ddns/cloudflare/zones/{zone_id}/records` | Implemented (Phase 4) |
 | `GET/POST /api/v1/service-account-keys`, `DELETE /api/v1/service-account-keys/{id}`, `POST /api/v1/auth/service-key/rotate` | Implemented (ADR-018) |
+| `POST /api/v1/mcp` | Implemented (ADR-020; [mcp.md](mcp.md)) |
 
 ## Known gaps
 
@@ -134,3 +135,13 @@ failed sync is a normal `200` `DdnsSyncResult` with `result: failed`.
 `make generate` rewrote `internal/api/gen/api.gen.go`. The frontend's generated types
 (`frontend/src/api/generated`) were **not** regenerated here (submodule untouched); `make ui-check-api`
 will report them stale until the owner runs `npm run gen:api`. (Superseded the same day: the UI work for REQ-UI-023 regenerated them; `npm run check:api` is clean.)
+
+## Spec change: MCP server
+
+| Change | Why |
+|--------|-----|
+| New operation `callMcp` (`POST /api/v1/mcp`, tag `mcp`, `x-token-scopes: [legacy, mcp]`), responses `200`, `202`, `400` (JSON-RPC error object, not the envelope), `401`, `403`, and a paragraph in `info.description` | REQ-MCP-001..003, ADR-020. Additive; no existing operation changed |
+
+`make generate` rewrote `internal/api/gen/api.gen.go`. The frontend's generated types
+(`frontend/src/api/generated`) were **not** regenerated (submodule untouched); `make ui-check-api` will report
+them stale until the owner regenerates them.

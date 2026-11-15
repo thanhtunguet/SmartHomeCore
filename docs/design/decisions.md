@@ -451,6 +451,8 @@ a revocation list, per-token labels in a table, restricting a token to chosen de
 
 ## ADR-018 — Service account keys: server-generated Ed25519 keys, scoped, individually revocable and self-rotating
 
+*Partly superseded by [ADR-020](#adr-020--the-controller-hosts-the-mcp-server-the-service-account-key-is-the-only-credential): the Controller hosts the MCP server and accepts any key on it.*
+
 **Context.** The legacy endpoints (ADR-017) and AI agents (an MCP server calling the Controller) need
 credentials that outlive a login session, that a user can create with a chosen lifetime, and that
 can be cut off one by one. The HS256 legacy tokens cannot: they have no row, so revoking one means
@@ -570,3 +572,61 @@ fragile; the Agent creates it on the machine where it will run.
 - The Windows shortcut, the Linux unit and the `.lnk` elevation flag have **not** been run on real
   hosts (no Windows machine; no systemd host in this session).
 - Not decided: macOS launchd generation, TLS flags for the Agent (an `https` binding still needs `agent.tls` in a config file), a Windows Service wrapper.
+
+---
+
+## ADR-020 — The Controller hosts the MCP server; the service account key is the only credential
+
+**Context.** AI agents (Claude and others) should be able to list the home's machines and turn them on
+and off. ADR-018 assumed an MCP server in a separate project that calls the REST API with an `mcp`-scoped
+key. The decision now is that the backend serves MCP itself, authenticated by a service account key, with
+**no permission layer of its own**: any valid key may use every tool, and if permissions are ever needed
+they belong to the key (a future scope or a per-key setting), not to the tools.
+
+**Decision.**
+- **One endpoint, `POST /api/v1/mcp`**, in the OpenAPI spec like every other operation (operation
+  `callMcp`, tag `mcp`). It speaks MCP over **stateless Streamable HTTP without SSE**: each `POST` carries one
+  JSON-RPC 2.0 message and a request is answered `200 application/json`; notifications and client responses are
+  `202` with no body; `GET` and `DELETE` are `405`; batches are refused (`400`). There are no sessions
+  (`Mcp-Session-Id` is not issued) and the server never pushes. This stays inside the guardrail against
+  WebSocket/SSE.
+- **Hand-written protocol layer, `internal/mcp`, standard library only.** It implements `initialize` (version
+  negotiation among `2025-11-25`, `2025-06-18`, `2025-03-26`), `ping`, `tools/list` and `tools/call`. No MCP SDK
+  is added: the surface is four methods, and a dependency would need to be justified against the "no new heavy
+  dependencies" rule. The package knows nothing about devices or authentication.
+- **Authentication = the existing key.** `middleware.Authorize` authenticates the bearer exactly as for every
+  operation; the operation lists `x-token-scopes: [legacy, mcp]`, i.e. **every key scope is accepted**. The
+  handler additionally requires that the principal is a **key** (`Principal.KeyID != ""`), so a session or
+  legacy HS256 token is `403`. No other check: no allowlist, no per-tool rule.
+- **Three tools**, adapters over the same services as REST and the legacy endpoints (so the same throttle,
+  idempotency and audit apply):
+  - `list_devices`: every device (pages of 100, at most 500) in a compact view: id, name, description, type, OS,
+    enabled, `status`, `power_transition`, `last_seen_at`, `last_checked_at`, `can_turn_on` (has a MAC address),
+    `can_turn_off` (has an agent). MAC, IP, ports and the agent binding are left out.
+  - `get_devices`: one device, by `device` = id or name (`devices.Service.Resolve`, ADR-017). The name is
+    plural as requested although it returns one device.
+  - `control_device` with `device` and `action`: `turn_on` = wake (`requestWake`), `turn_off` = signed shutdown
+    (`requestShutdown`), `check_status` = `Monitor.ProbeNow` now, then the stored device. `turn_on`/`turn_off`
+    take the per-device slot of REST/legacy (ADR-012) and return the command (`202` semantics, never waiting
+    for the machine); the audit entry says `via: mcp` and carries `service_key_id`, the actor is the key's owner.
+- **Errors the model can fix are tool results with `isError: true`** (unknown device, unknown action, no MAC,
+  no agent, throttled), with a hint in the text; only malformed JSON-RPC, unknown methods and unknown tools
+  are protocol errors. Internal failures are logged and reported as "internal error", never with detail.
+- Results carry the JSON as text **and** as `structuredContent`; tool annotations say which tools are
+  read-only and that `control_device` is destructive but idempotent.
+
+**Alternatives considered.** *A separate MCP server process or project* (ADR-018's assumption): one more thing to
+deploy and to keep in step with the API, and it would have to hold the key itself. *The official Go SDK*:
+saves little code and adds a dependency. *Full Streamable HTTP with SSE and sessions*: needed only for
+server-initiated messages, which this server never sends. *Exposing the REST API as tools one to one*: far more
+surface for an agent than "list, get, switch".
+
+**Consequences.** Any valid key, whatever its scope, can power machines on and off through MCP; the
+`legacy` scope no longer confines a key to the three legacy URLs. A leaked key is as strong as its owner
+for these tools until it expires or is revoked (ADR-018). The `mcp` scope of ADR-018 and its REST allowlist
+still exist and are untouched; they are redundant for MCP and can be removed later (that needs a migration,
+because `service_account_keys.scope` has a CHECK on it). The endpoint does not validate the `Origin` header
+(DNS rebinding): it needs a bearer key, which a browser page cannot attach. No resumability and no
+server-to-client notifications. The superseded clause of ADR-018 is "the MCP server itself is **not part of this
+repository**".
+
