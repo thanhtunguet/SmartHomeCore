@@ -5,6 +5,7 @@ that spans days uses its end date). Newest entries are listed first below.
 
 | Date | Entry | Summary |
 |------|-------|---------|
+| 2026-11-15 | [2026-11-15-portable-agent.md](2026-11-15-portable-agent.md) | Portable Agent (ADR-019): `--agent-id`/`--trusted-controller`/`--agent-listen`, setup prompt writes the systemd unit or Windows shortcut, UI panel generates the id and the command per OS |
 | 2026-11-15 | [2026-11-15-package-readme-data-dir.md](2026-11-15-package-readme-data-dir.md) | Package README states the SQLite location and documents moving `data_dir` (env var overrides YAML under the packaged unit; `ReadWritePaths` needed) |
 | 2026-11-14 | [2026-11-14-service-account-keys.md](2026-11-14-service-account-keys.md) | Service account keys: server-generated Ed25519 keys (sealed private key), TTL default 1 year, scopes `legacy`/`mcp`, create/list/revoke, self-rotation with grace and idempotent retry, migration `0007` (ADR-018) |
 | 2026-11-14 | [2026-11-14-legacy-paths-origin.md](2026-11-14-legacy-paths-origin.md) | Device sheet: legacy endpoints show path only; Origin is its own copyable field |

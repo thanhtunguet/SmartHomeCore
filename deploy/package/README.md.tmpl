@@ -102,6 +102,39 @@ Copy the printed base64 public key; each Agent trusts it in `agent.trusted_contr
 
 ## Install: Agent (on each managed machine)
 
+### Option A (recommended): the command from the web UI, no config file
+
+The Agent takes its id and the Controller public key as arguments, so it needs no config file and stores
+nothing on the machine.
+
+1. In the web UI open the device, **Edit > Remote Shutdown**, enable the integration (a new Agent ID is
+   generated, or press **Generate**), pick the **Linux** tab and copy the command. Save the device.
+2. On the managed machine, in the folder where this package was extracted, run the binary with nothing
+   but the mode, in a terminal, and paste the command when it asks:
+
+```bash
+./homecore --mode agent
+```
+
+   It writes `homecore-agent.service` and `50-homecore-agent.rules` in the current folder, prints the
+   exact `sudo` lines that install them (user, binary, polkit rule, `systemctl enable --now`) and the
+   check commands, then exits. It installs nothing itself. Run the printed lines.
+
+Running the pasted command directly (`./homecore --mode agent --agent-id ... --trusted-controller ...`)
+starts the Agent in the foreground instead: handy to try it before installing the service.
+
+**Verify**
+
+```bash
+systemctl is-active homecore-agent                   # active
+curl -s http://127.0.0.1:9750/agent/v1/healthz       # {"agent_id":"<the id shown in the UI>","status":"ok",...}
+```
+
+The web UI shows the Agent as *Ready* within a minute. Without a terminal (scripts, AI agents) the prompt
+cannot run: use Option B, or write the unit yourself with the command from the UI as `ExecStart`.
+
+### Option B: config file
+
 Needs the Controller public key from above.
 
 ```bash
@@ -144,6 +177,7 @@ Then, in the web UI, bind that `agent_id` (and the agent URL, `http://<agent-ip>
 Notes
 - polkit older than 0.106 (old Debian/Ubuntu) needs an equivalent `.pkla` file instead of the `.rules` JS file.
 - Keep the Agent port closed to the Internet (firewall it to the LAN / VPN subnet).
+- Option B only: `agent.id` in the config file (or `HOMECORE_AGENT_ID`) makes the Agent use an id from the UI instead of creating one in `/var/lib/homecore-agent/agent_id`.
 - Agent and Controller can be installed on the same machine; use the two systemd units, they use separate users and data dirs.
 
 ---
@@ -233,7 +267,7 @@ If the upgrade did not start (no migration ran, `migrations_applied=0`), restori
 | `/etc/homecore/homecore.yaml`, `/etc/homecore/agent.yaml` | configuration | yes |
 | `/var/lib/homecore/homecore.db` (+ `-wal`, `-shm`) | SQLite database | yes (stop the service, or copy all three files together) |
 | `/var/lib/homecore/master.key` | key that seals every secret in the database | **yes, and keep it with the database**: without it the sealed secrets (Cloudflare tokens, signing keys) cannot be read and the Controller will not replace them |
-| `/var/lib/homecore-agent/` | the Agent identity (`agent_id`) | yes |
+| `/var/lib/homecore-agent/` | the Agent identity (`agent_id`); only exists for an Agent installed with Option B (Option A keeps the id in the unit file) | yes |
 
 Never put secrets in logs, tickets or chat. The files above are `0600`/`0640` on purpose.
 

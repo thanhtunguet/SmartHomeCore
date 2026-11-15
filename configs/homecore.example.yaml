@@ -48,8 +48,13 @@ controller:
     allow_insecure_http: false  # tests and development only: accepts http:// providers and Cloudflare URL
 
 agent:
+  # The Agent can run without this file: copy the command shown in the web UI (device > Remote Shutdown),
+  # which passes --agent-id, --trusted-controller and --agent-listen as arguments. Run
+  # `homecore --mode agent` in a terminal with nothing else and it asks for that command and writes the
+  # systemd unit (Linux) or the shortcut (Windows).
+  id: ""                    # agent_id (UUID) from the UI; env HOMECORE_AGENT_ID, flag --agent-id. Set: nothing is stored on disk
   listen: ":9750"           # LAN only. Never port-forward; use a VPN for remote access.
-  data_dir: ""              # default: <data_dir>/agent
+  data_dir: ""              # default: <data_dir>/agent. Holds agent_id only when id is empty
   tls:
     cert_file: ""
     key_file: ""

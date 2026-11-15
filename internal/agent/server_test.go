@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -102,5 +103,43 @@ func TestUnsignedRequestRejected(t *testing.T) {
 	}
 	if power.off.Load() != 0 {
 		t.Fatal("must not execute")
+	}
+}
+
+func TestConfiguredIDIsUsedAndNothingIsWrittenToDisk(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	cfg := config.Default().Agent
+	dir := t.TempDir() + "/never-created"
+	cfg.DataDir = dir
+	cfg.ID = "0198A1B2-C3D4-7E5F-8A9B-0C1D2E3F4A5B" // upper case: the id is compared byte for byte, so it is normalised
+	cfg.TrustedControllers = []config.TrustedController{{Name: "cli", PublicKey: protocol.EncodePublicKey(pub)}}
+	s, err := New(cfg, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)), &countingPower{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.ID() != "0198a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b" {
+		t.Fatalf("id = %q", s.ID())
+	}
+	if HasStoredID(dir) {
+		t.Fatal("a configured id must not create agent_id")
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("the data dir must not be created: %v", err)
+	}
+}
+
+func TestConfiguredIDMustBeAUUID(t *testing.T) {
+	cfg := config.Default().Agent
+	cfg.DataDir = t.TempDir()
+	cfg.ID = "not-a-uuid"
+	if _, err := New(cfg, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)), &countingPower{}); err == nil {
+		t.Fatal("expected an error")
+	}
+}
+
+func TestStoredIDStillWorksWithoutAConfiguredID(t *testing.T) {
+	s, _, _ := newTestServer(t) // no cfg.ID: created in the data dir as before (ADR-002)
+	if _, err := uuid.Parse(s.ID()); err != nil {
+		t.Fatalf("id %q: %v", s.ID(), err)
 	}
 }

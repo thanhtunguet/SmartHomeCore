@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1 |
-| Last reviewed | 2026-11-14 (service account keys; legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
+| Last reviewed | 2026-11-15 (portable Agent, ADR-019; earlier: 2026-11-14 service account keys; legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
 | Requirements | [requirements/overview.md](../requirements/overview.md) |
 | Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs) |
 | API contract | [api/openapi.yaml](../../api/openapi.yaml) (source of truth) |
@@ -97,6 +97,11 @@ homecore --mode agent        # Agent only
 homecore --mode both         # Both, in one process, on two separate listeners
 ```
 
+The Agent needs no file: `--agent-id`, `--trusted-controller` and `--agent-listen` carry its identity,
+the Controller public key and its port (ADR-019). The web UI builds that command per operating system.
+Started in a terminal with `--mode agent` and no identity, the binary asks for the pasted command
+instead (`internal/agentsetup`) and writes a systemd unit (Linux) or a shortcut (Windows) for it.
+
 In `both` mode the two roles share only the logger and process lifecycle. They have **separate
 listeners, separate auth and separate config sections**. The Agent never reads the Controller DB
 and the Controller REST API cannot reach Agent internals except over the signed protocol.
@@ -143,6 +148,7 @@ internal/
   wol/                   magic packet build/send, MAC parsing, broadcast resolution
   commands/              command model + state machine, dispatcher, history
   agent/                 Agent listener, verifier, executor
+  agentsetup/            setup prompt: parses the UI command, writes the systemd unit / Windows shortcut
     protocol/            signed-command wire format (shared by Controller client and Agent)
   ddns/                  public IP discovery, Cloudflare client, sync job
   system/                metrics collection (via platform provider)

@@ -1,6 +1,6 @@
 # HomeCore Agent Protocol v1
 
-Last reviewed: 2026-11-14 (Phase 3: Controller behaviour implemented; wire format unchanged).
+Last reviewed: 2026-11-15 (agent_id may be supplied as an argument, ADR-019; wire format unchanged).
 
 Normative spec for Controller → Agent commands. Implementation:
 `internal/agent/protocol` (shared by both roles). Rationale: ADR-001, ADR-005.
@@ -9,9 +9,13 @@ Normative spec for Controller → Agent commands. Implementation:
 
 - **Controller key**: Ed25519 key pair. `key_id` = lowercase hex of the first 8 bytes of
   `SHA-256(public_key)` (16 hex chars). Public keys are exchanged as standard base64 (32 bytes).
-- **Agent identity**: `agent_id`, a UUID generated on the Agent's first start and persisted in
-  `<agent.data_dir>/agent_id`. Printed at startup; entered on the Controller when binding a device.
-- **Trust**: the Agent config lists trusted Controller public keys. The Agent never holds a private
+- **Agent identity**: `agent_id`, a UUID. Normally chosen by the Controller's UI when the device is bound
+  and given to the Agent as `--agent-id` / `HOMECORE_AGENT_ID` / `agent.id` (ADR-019), in which case
+  nothing is stored on the Agent; the Agent compares the **canonical lower-case** form. Without one, the
+  Agent generates it on first start and persists it in `<agent.data_dir>/agent_id` (ADR-002). Logged at
+  startup. It is an address, not a secret: authentication is the signature.
+- **Trust**: the Agent's trusted Controller public keys come from `agent.trusted_controllers` and from
+  `--trusted-controller` (repeatable). The Agent never holds a private
   key that can issue commands.
 
 ## 2. Request

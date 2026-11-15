@@ -116,3 +116,21 @@ func TestDDNSConfig(t *testing.T) {
 		t.Fatalf("agent mode: %v", err)
 	}
 }
+
+func TestAgentIDFromYAMLAndEnvIsValidated(t *testing.T) {
+	const id = "0198a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
+	cfg, err := LoadBytes([]byte("mode: agent\nagent:\n  id: "+id+"\n"), nil)
+	if err != nil || cfg.Agent.ID != id {
+		t.Fatalf("yaml id: %v %q", err, cfg.Agent.ID)
+	}
+	env := func(k string) (string, bool) { return id, k == "HOMECORE_AGENT_ID" }
+	cfg, err = LoadBytes([]byte("mode: agent\nagent:\n  id: 11111111-1111-4111-8111-111111111111\n"), env)
+	if err != nil || cfg.Agent.ID != id {
+		t.Fatalf("the environment must override the file: %v %q", err, cfg.Agent.ID)
+	}
+	for _, bad := range []string{"not-a-uuid", "00000000-0000-0000-0000-000000000000"} {
+		if _, err := LoadBytes([]byte("mode: agent\nagent:\n  id: "+bad+"\n"), nil); err == nil || !strings.Contains(err.Error(), "agent.id") {
+			t.Errorf("agent.id %q must be rejected, got %v", bad, err)
+		}
+	}
+}

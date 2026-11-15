@@ -17,7 +17,11 @@ sudo install -m 0640 -g homecore configs/homecore.example.yaml /etc/homecore/hom
 sudo install -m 0644 deploy/systemd/homecore-controller.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now homecore-controller
 
-# Agent (on each managed machine)
+# Agent, recommended: no config file. In the web UI (device > Remote Shutdown) copy the command for this OS,
+# then run the binary with nothing else and paste it: it writes homecore-agent.service and the polkit rule
+# and prints the install steps (ADR-019).
+#   ./homecore --mode agent
+# Agent with a config file (the id is created on first start):
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin homecore-agent
 sudo install -m 0755 build/homecore-linux-amd64 /usr/local/bin/homecore
 sudo install -m 0640 -g homecore-agent agent.yaml /etc/homecore/agent.yaml   # mode: agent + trusted_controllers
@@ -39,9 +43,15 @@ sudo -u homecore homecore key show --config /etc/homecore/homecore.yaml
 ```
 
 # Windows Agent (shutdown/reboot implemented, not yet run on a real Windows host)
-# Run an ELEVATED console (Administrator) or a Task Scheduler task "Run with highest privileges".
-# There is no Windows Service wrapper yet. Set data_dir explicitly: the default is ./data relative to
-# the working directory (System32 when elevated).
+# Recommended: in the web UI (device > Remote Shutdown > Windows) copy the command, then in PowerShell, in the
+# folder with homecore.exe, run it with nothing else and paste the command when asked:
+#   .\homecore.exe --mode agent
+# It creates "HomeCore Agent.lnk" (runs as administrator) and prints how to start it at sign-in
+# (Register-ScheduledTask) and how to open the firewall for the local subnet (New-NetFirewallRule).
+# Nothing is stored on the machine, so the working directory no longer matters.
+# With a config file instead: run an ELEVATED console (Administrator) or a Task Scheduler task
+# "Run with highest privileges". There is no Windows Service wrapper yet. Set data_dir explicitly: the
+# default is ./data relative to the working directory (System32 when elevated).
 #   homecore.exe --mode agent --config C:\ProgramData\homecore\agent.yaml
 # Applications are closed by force on shutdown: unsaved data is lost.
 

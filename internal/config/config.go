@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
 
@@ -122,6 +123,9 @@ type Commands struct {
 
 // Agent configures the Agent role.
 type Agent struct {
+	// ID is the agent_id (UUID). When set it is used as is and nothing is read from or written to
+	// DataDir (portable Agent, ADR-019); otherwise the id is persisted in <DataDir>/agent_id.
+	ID                 string              `yaml:"id"`
 	Listen             string              `yaml:"listen"`
 	DataDir            string              `yaml:"data_dir"`
 	TLS                TLS                 `yaml:"tls"`
@@ -233,6 +237,7 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) {
 	set("HOMECORE_LOG_FORMAT", &cfg.Log.Format)
 	set("HOMECORE_CONTROLLER_LISTEN", &cfg.Controller.Listen)
 	set("HOMECORE_AGENT_LISTEN", &cfg.Agent.Listen)
+	set("HOMECORE_AGENT_ID", &cfg.Agent.ID)
 }
 
 // finalize derives dependent defaults.
@@ -303,6 +308,11 @@ func (c Config) Validate() error {
 		if err := validListen(ag.Listen); err != nil {
 			add("agent.listen: %v", err)
 		}
+		if ag.ID != "" {
+			if id, err := uuid.Parse(ag.ID); err != nil || id == uuid.Nil {
+				add("agent.id: must be a non-nil UUID (got %q)", ag.ID)
+			}
+		}
 		if c.Mode == ModeBoth && ag.Listen == c.Controller.Listen {
 			add("agent.listen: must differ from controller.listen in both mode")
 		}
@@ -358,6 +368,9 @@ func validateDDNS(d DDNS) []string {
 	}
 	return errs
 }
+
+// ValidListen reports whether addr is a host:port listen address ("" host = all interfaces).
+func ValidListen(addr string) error { return validListen(addr) }
 
 func validListen(addr string) error {
 	if _, _, err := net.SplitHostPort(addr); err != nil {

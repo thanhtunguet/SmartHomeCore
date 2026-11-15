@@ -147,6 +147,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [ ] CI pipeline: lint, test, race, `check-generated`, `cross`
 - [ ] Release pipeline (partial): GitHub Actions `build.yml` builds the frontend zip and Linux amd64/arm64 packages and publishes them on `v*` tags; other targets (linux/arm, macOS, Windows, Android) still open
 - [x] Windows agent power adapter (`InitiateSystemShutdownExW`, run elevated; not yet run on a Windows host)
+- [x] Portable Agent (ADR-019): `--agent-id` / `--trusted-controller` / `--agent-listen`, setup prompt that writes the systemd unit or the Windows shortcut, UI panel with the command per OS (REQ-AG-016..019, REQ-UI-025; frontend submodule: commit it in HomeCoreUI and bump the pointer; real Windows and Linux hosts not tested)
 - [ ] Windows Service wrapper for the Agent, and a Windows release package
 
 ## Backlog (known gaps from requirement docs)
@@ -160,7 +161,9 @@ Tick items in the same change that completes them, and add a changelog entry.
 | Cap the agent's accepted-`command_id` map (the protocol spec says caches are bounded) | REQ-AG-008 gap |
 | Signed agent acknowledgements (protocol v2) | agent-protocol §7 |
 | Signed agent announce for automatic IP updates | ADR-002 |
-| Tests for CLI flag precedence | REQ-RT-003 gap |
+| Tests for CLI flag precedence | REQ-RT-003 gap (the agent flags merge is tested, REQ-AG-016/017; the `flag` declarations are not) |
+| launchd plist from the Agent setup prompt (macOS); TLS flags for the Agent so an `https` binding needs no config file | ADR-019 |
+| Run the generated Windows shortcut and Linux unit on real hosts; check the shortcut asks for elevation | REQ-AG-019 |
 | Test `/readyz` 503 path and `WithTx` rollback | REQ-API-004, REQ-ST-004 |
 | Re-run the UI against the real Controller as Phases 3/4 land (UI is verified only against a mock; Phase 2 verified the API shapes with curl against `mappers.ts`, not the running UI) | GAP-BE-01..03 |
 | Hostname field in the device form (once hostname-based probing exists) | GAP-API-15 |

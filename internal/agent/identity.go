@@ -32,3 +32,10 @@ func LoadOrCreateID(dir string) (string, error) {
 	}
 	return id, nil
 }
+
+// HasStoredID reports whether <dir>/agent_id exists, i.e. whether this machine already has an Agent
+// identity persisted by an earlier run.
+func HasStoredID(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "agent_id"))
+	return err == nil
+}

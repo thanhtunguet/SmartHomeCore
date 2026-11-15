@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/thanhtunguet/homecore/internal/agent/protocol"
 	"github.com/thanhtunguet/homecore/internal/config"
 	"github.com/thanhtunguet/homecore/internal/httpx"
@@ -55,9 +56,21 @@ type scheduledAction struct {
 // New builds an Agent server. power may be nil to use the platform default.
 func New(cfg config.Agent, shutdownTimeout time.Duration, log *slog.Logger, power platform.PowerController) (*Server, error) {
 	log = log.With("role", "agent")
-	agentID, err := LoadOrCreateID(cfg.DataDir)
-	if err != nil {
-		return nil, err
+	// An id given by flag, environment or config (ADR-019) is used as is and nothing is touched on
+	// disk; otherwise the id persisted in the data dir is used, created on first start (ADR-002).
+	agentID, idSource := cfg.ID, "configured"
+	if agentID != "" {
+		id, err := uuid.Parse(agentID)
+		if err != nil || id == uuid.Nil {
+			return nil, fmt.Errorf("agent.id: must be a non-nil UUID, got %q", agentID)
+		}
+		agentID = id.String() // canonical lower case: it is compared byte for byte with the command's agent_id
+	} else {
+		var err error
+		if agentID, err = LoadOrCreateID(cfg.DataDir); err != nil {
+			return nil, err
+		}
+		idSource = "data_dir"
 	}
 	keys := make([]ed25519.PublicKey, 0, len(cfg.TrustedControllers))
 	for i, tc := range cfg.TrustedControllers {
@@ -88,7 +101,7 @@ func New(cfg config.Agent, shutdownTimeout time.Duration, log *slog.Logger, powe
 	if power == nil {
 		power = platform.NewPowerController(cfg.DryRun, log)
 	}
-	log.Info("agent identity", "agent_id", agentID)
+	log.Info("agent identity", "agent_id", agentID, "source", idSource)
 	return &Server{
 		cfg: cfg, shutdown: shutdownTimeout, log: log, agentID: agentID,
 		verifier: v, power: power, now: time.Now,
