@@ -5,7 +5,7 @@
 | Brief | not in the brief: added at the owner's request (ADR-021) |
 | Code | `internal/alerts` (`alerts.go`, `telegram.go`, `repo.go`, `repo_sqlite.go`, `service.go`, `hooks.go`, test fake `alertstest/`), hook points in `internal/ddns/service.go`, `internal/commands/engine.go`, `internal/monitoring/monitor.go`, `internal/api/handlers/handlers_alerts.go`, `internal/storage/migrations/0008_alert_channels.sql`, `internal/app/app.go` |
 | Design | [architecture §6.12](../design/architecture.md), [database.md](../design/database.md) (`alert_channels`), [ADR-021](../design/decisions.md#adr-021--alerts-channels-adapters-and-hooks-in-the-producers) |
-| Last updated | 2026-11-15 |
+| Last updated | 2026-11-15 (UI added, REQ-UI-030) |
 | Status | **Implemented**, verified by unit tests, integration tests through the real router with a fake Telegram Bot API, and `-race`. **Not** verified against the real Telegram (see Known gaps) |
 
 An alert tells the owner something happened. A **channel** is one destination (today a Telegram
@@ -49,16 +49,16 @@ and `internal/api` (`alerts_test.go`; every response is checked against `api/ope
 |----|-------------|--------|-------------|
 | REQ-ALERT-010 | **Audit.** `alert_channel.create`, `.update`, `.delete` and `.test` are written to `audit_log` with the acting user. Details: name, type, the **names** of the changed fields (never a value) and, for a failed test, the error text. They appear in the activity feed under category `system` with English messages ("Alert channel My phone created", "Test message sent to alert channel My phone"). The alerts themselves are not audited (they are not an action of a user). | Implemented | `api.TestAlertChannelAudit`, `activity.TestMessages` |
 
-REQ-API-032 (operations, authentication) is in [http-api.md](http-api.md).
+REQ-API-032 (operations, authentication) is in [http-api.md](http-api.md). The Settings card that manages channels is REQ-UI-030 in [web-ui.md](web-ui.md).
 
 ## Known gaps
 
 - **Never run against the real Telegram.** The adapter follows the documented Bot API (`sendMessage`,
-  `{ok, description}` replies); the tests use `alertstest`, a fake of it. First live run is an owner
-  action: create a bot with BotFather, send it `/start` from the target account, add the channel and
-  press the test button.
-- **No UI yet.** The REST API is complete; the frontend submodule has no screen for channels and its
-  generated types are stale until regenerated (`make ui-check-api`).
+  `{ok, description}` replies); the tests use `alertstest`, a fake of it. The owner decided (2026-11-15)
+  that a live run is not needed now: the Bot API is mature and stable. If a channel does not deliver,
+  the reason is on the channel (`last_error`, shown in Settings) and the test button reproduces it.
+- **The UI is not run in a browser** (REQ-UI-030: type-check, build and unit tests of its logic only;
+  there is no DOM test environment in the frontend).
 - **Messages are in English** and fixed; there is no template, language or quiet-hours setting.
 - **Not alerted** (not asked for): a DDNS sync that keeps failing, a command that timed out or
   completed, an agent that became `unreachable`, a Controller that restarted. The Controller cannot

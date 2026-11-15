@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | Brief §7 (phases), §8 (MVP); [architecture](../design/architecture.md) |
-| Last updated | 2026-11-15 (alerts; earlier: MCP server; earlier: 2026-11-14 service account keys; legacy endpoints; build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
+| Last updated | 2026-11-15 (alerts UI; earlier: alerts backend; MCP server; earlier: 2026-11-14 service account keys; legacy endpoints; build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
 
 Legend: `[x]` done and verified · `[~]` partially done · `[ ]` not started.
 Tick items in the same change that completes them, and add a changelog entry.
@@ -145,8 +145,8 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [x] Telegram adapter: bot token + target user id (REQ-ALERT-005)
 - [x] Hooks: new public IP (`ddns.Service.Sync`), wake/shutdown requests (`commands.Engine.Request`), device status change outside HomeCore's control (`monitoring` transition hook) (REQ-ALERT-002..004)
 - [x] `/alerts/channels` CRUD and `/test` in the spec and the handlers, audited (REQ-API-032, REQ-ALERT-009/010)
-- [ ] Run once against the real Telegram: BotFather bot, `/start` from the target, add the channel, press test (everything so far ran against `alertstest`)
-- [ ] UI: Settings card for alert channels (list, add Telegram with token + user id, events, enable, test button, `last_error`), and regenerate the frontend's API types (`make ui-check-api` is stale; submodule)
+- [~] Run once against the real Telegram: **skipped by the owner's decision (2026-11-15)**, the Bot API is mature; everything ran against `alertstest`. A channel that fails shows its `last_error` in Settings
+- [x] UI: Settings card for alert channels (list, add/edit Telegram with token + user id, events, pause, test button, `last_error`, delete) and regenerated frontend API types; `make ui-check` passes (REQ-UI-030). Commit in HomeCoreUI and bump the submodule pointer
 - [ ] More adapters (the owner said "later"): each is one `Factory` plus a spec enum value (REQ-ALERT-011)
 
 ## Phase 5 — Android integration
