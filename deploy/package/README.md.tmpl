@@ -65,6 +65,7 @@ sudo systemctl daemon-reload
 
 Edit `/etc/homecore/homecore.yaml` if needed (listen address, TLS, `trusted_proxies`, DDNS). The defaults
 work out of the box: listen `:8080`, data in `/var/lib/homecore` (created by systemd `StateDirectory`).
+The SQLite database is `/var/lib/homecore/homecore.db` (see [Data and secrets](#data-and-secrets) to move it).
 
 ```bash
 sudo systemctl enable --now homecore-controller
@@ -235,6 +236,35 @@ If the upgrade did not start (no migration ran, `migrations_applied=0`), restori
 | `/var/lib/homecore-agent/` | the Agent identity (`agent_id`) | yes |
 
 Never put secrets in logs, tickets or chat. The files above are `0600`/`0640` on purpose.
+
+### Where the database lives and how to move it
+
+The Controller database is always `<data_dir>/homecore.db`, and `master.key` sits next to it. `data_dir` is
+resolved in this order (first match wins):
+
+1. `--data-dir DIR` (only the `user`, `token` and `key` subcommands)
+2. environment variable `HOMECORE_DATA_DIR`
+3. `data_dir:` in the config file
+4. default `./data`, relative to the working directory of the process
+
+**The packaged unit sets `HOMECORE_DATA_DIR=/var/lib/homecore`, so changing `data_dir:` in
+`/etc/homecore/homecore.yaml` has no effect for the service.** To move the data, use a drop-in:
+
+```bash
+sudo systemctl stop homecore-controller
+sudo mkdir -p /srv/homecore && sudo chown homecore:homecore /srv/homecore && sudo chmod 0700 /srv/homecore
+sudo cp -a /var/lib/homecore/. /srv/homecore/          # homecore.db, -wal, -shm and master.key together
+sudo systemctl edit homecore-controller                # add the three lines below, save
+#   [Service]
+#   Environment=HOMECORE_DATA_DIR=/srv/homecore
+#   ReadWritePaths=/srv/homecore
+sudo systemctl start homecore-controller
+```
+
+`ReadWritePaths` is required: the unit uses `ProtectSystem=strict`, so the service can only write to its
+`StateDirectory` (`/var/lib/homecore`) unless another path is listed. The `homecore user|token|key`
+commands you run by hand must use the same directory (`HOMECORE_DATA_DIR=/srv/homecore` or `--data-dir`).
+Verify: `sudo ls -l /srv/homecore/homecore.db` and `journalctl -u homecore-controller -n 20` shows the new `data_dir`.
 
 ## Troubleshooting
 
