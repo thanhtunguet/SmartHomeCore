@@ -5,6 +5,7 @@ that spans days uses its end date). Newest entries are listed first below.
 
 | Date | Entry | Summary |
 |------|-------|---------|
+| 2026-11-15 | [2026-11-15-ci-pnpm.md](2026-11-15-ci-pnpm.md) | CI and Makefile use pnpm (`pnpm/action-setup`, `--frozen-lockfile`, pnpm cache) after the frontend moved off npm |
 | 2026-11-15 | [2026-11-15-nginx-template.md](2026-11-15-nginx-template.md) | nginx template: gzip + cached static frontend with SPA fallback, `/api` proxy with WebSocket upgrade, verified in a container |
 | 2026-11-15 | [2026-11-15-portable-agent.md](2026-11-15-portable-agent.md) | Portable Agent (ADR-019): `--agent-id`/`--trusted-controller`/`--agent-listen`, setup prompt writes the systemd unit or Windows shortcut, UI panel generates the id and the command per OS |
 | 2026-11-15 | [2026-11-15-package-readme-data-dir.md](2026-11-15-package-readme-data-dir.md) | Package README states the SQLite location and documents moving `data_dir` (env var overrides YAML under the packaged unit; `ReadWritePaths` needed) |

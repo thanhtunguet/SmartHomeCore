@@ -56,17 +56,20 @@ jobs:
           git submodule update --init frontend # the commit pinned by the gitlink
           git submodule status frontend
           test -f frontend/package.json
+      - uses: pnpm/action-setup@v4 # must run before setup-node so `cache: pnpm` finds pnpm
+        with:
+          version: 10 # the lockfile (lockfileVersion 9.0) is read by pnpm 9+
       - uses: actions/setup-node@v4
         with:
           node-version: 22 # vite 8 needs >= 22.12
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
       - name: Install
         working-directory: frontend
-        run: npm ci --no-audit --no-fund
+        run: pnpm install --frozen-lockfile
       - name: Build (same output dir as `make ui-build`)
         working-directory: frontend
-        run: npm run build -- --outDir ../web/static --emptyOutDir
+        run: pnpm run build --outDir ../web/static --emptyOutDir
       - name: Zip
         run: |
           test -f web/static/index.html

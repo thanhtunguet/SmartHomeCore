@@ -21,31 +21,31 @@ build: ## Build the homecore binary into build/
 .PHONY: ui-install
 ui-install: ## Install frontend dependencies (needs: git submodule update --init)
 	@test -f $(UI_DIR)/package.json || (echo "frontend submodule missing: git submodule update --init"; exit 1)
-	cd $(UI_DIR) && npm ci --no-audit --no-fund
+	cd $(UI_DIR) && pnpm install --frozen-lockfile
 
 .PHONY: ui-build
 ui-build: ui-install ## Build the frontend into web/static (embedded by `make build`)
-	cd $(UI_DIR) && npm run build -- --outDir ../web/static --emptyOutDir
+	cd $(UI_DIR) && pnpm run build --outDir ../web/static --emptyOutDir
 	@touch web/static/.gitkeep
 
 .PHONY: ui-lint
 ui-lint: ## Type-check the frontend
-	cd $(UI_DIR) && npm run lint
+	cd $(UI_DIR) && pnpm run lint
 
 .PHONY: ui-test
 ui-test: ui-install ## Frontend unit and contract tests (no Controller needed)
-	cd $(UI_DIR) && npm test
+	cd $(UI_DIR) && pnpm test
 
 .PHONY: ui-check-api
 ui-check-api: ui-install ## Fail if the UI's generated wire types are stale against api/openapi.yaml
-	cd $(UI_DIR) && npm run check:api
+	cd $(UI_DIR) && pnpm run check:api
 
 .PHONY: ui-check
 ui-check: ui-lint ui-test ui-check-api ## All frontend checks: type-check, tests, generated types
 
 .PHONY: ui-dev
 ui-dev: ## Frontend dev server on :3000, proxying /api to the Controller on :8080 (run `make run` too)
-	cd $(UI_DIR) && npm run dev
+	cd $(UI_DIR) && pnpm run dev
 
 .PHONY: build-full
 build-full: ui-build build ## Build the UI, then the homecore binary with the UI embedded
