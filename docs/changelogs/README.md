@@ -5,6 +5,7 @@ that spans days uses its end date). Newest entries are listed first below.
 
 | Date | Entry | Summary |
 |------|-------|---------|
+| 2026-11-15 | [2026-11-15-confirm-dialogs.md](2026-11-15-confirm-dialogs.md) | `window.confirm` replaced by a shared modal `ConfirmDialog` (4 places); device cards show a disabled Power off button instead of "Pwr n/a" |
 | 2026-11-15 | [2026-11-15-device-status-section.md](2026-11-15-device-status-section.md) | Device sheet: three action buttons replaced by a "Device Status" section with Power on / Power off (state-dependent) and a refresh icon button |
 | 2026-11-15 | [2026-11-15-responsive-shell.md](2026-11-15-responsive-shell.md) | Compact icon-only header buttons, overlapping sidebar with fixed main margin, 2×2 Dashboard cards below `lg` |
 | 2026-11-15 | [2026-11-15-ci-pnpm.md](2026-11-15-ci-pnpm.md) | CI and Makefile use pnpm (`pnpm/action-setup`, `--frozen-lockfile`, pnpm cache) after the frontend moved off npm |
