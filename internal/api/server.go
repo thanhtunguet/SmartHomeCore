@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"path"
 	"strings"
@@ -123,6 +124,7 @@ func newRouter(d Deps) (http.Handler, error) {
 
 	cfg := d.Config
 	r := chi.NewRouter()
+	r.Use(loopbackMethodOverride)
 	r.Use(chimw.RequestID)
 	// Resolve the client IP for logging and rate limiting. X-Forwarded-For is honoured only when
 	// the TCP peer is a configured trusted proxy, so clients cannot spoof their address.
@@ -190,6 +192,25 @@ func newRouter(d Deps) (http.Handler, error) {
 		httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 	})
 	return r, nil
+}
+
+// loopbackMethodOverride supports the Android HTTP gateway, whose platform HTTP client does
+// not allow PATCH as an outgoing method. The override is accepted only from loopback and only
+// for PATCH; external clients cannot alter route selection with a header.
+func loopbackMethodOverride(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if r.Method == http.MethodPost && err == nil {
+			ip := net.ParseIP(host)
+			if ip != nil && ip.IsLoopback() && strings.EqualFold(r.Header.Get("X-HomeCore-Method-Override"), http.MethodPatch) {
+				clone := r.Clone(r.Context())
+				clone.Method = http.MethodPatch
+				next.ServeHTTP(w, clone)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // staticHandler serves the embedded frontend with SPA fallback to index.html. Unknown /api paths

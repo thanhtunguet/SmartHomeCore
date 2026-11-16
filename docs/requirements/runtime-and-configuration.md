@@ -5,8 +5,8 @@
 | Brief | §1 (roles, one build), §2, §5 ("One binary, several roles") |
 | Code | `cmd/homecore` (`main.go`, `user.go`), `internal/app`, `internal/config`, `internal/logging`, `internal/httpx`, `internal/version`, `mobile` |
 | Design | [architecture §4](../design/architecture.md#4-runtime-model) |
-| Last updated | 2026-11-15 (agent.id, `--agent-id`/`--trusted-controller`/`--agent-listen`; earlier: 2026-11-14 Phase 4: REQ-RT-013 DDNS keys; earlier: Phase 3 REQ-RT-012 `homecore key show`, Phase 2 REQ-RT-004 command-deadline and retention checks) |
-| Status | **Implemented** |
+| Last updated | 2026-11-16 (Android mobile Controller lifecycle and account methods; earlier: agent.id, `--agent-id`/`--trusted-controller`/`--agent-listen`; earlier: 2026-11-14 Phase 4: REQ-RT-013 DDNS keys; earlier: Phase 3 REQ-RT-012 `homecore key show`, Phase 2 REQ-RT-004 command-deadline and retention checks) |
+| Status | **Implemented; Android host runtime validation pending** |
 
 ## Functional requirements
 
@@ -19,7 +19,7 @@
 | REQ-RT-005 | Every long-running component exposes `Run(ctx) error`. On SIGINT/SIGTERM (or `mobile.Stop`) the context is cancelled and HTTP listeners shut down gracefully within `shutdown_timeout` (default 10 s). If one role fails, the other is stopped and the process exits non-zero. | Implemented | Smoke test (clean exit, both listeners stopped) |
 | REQ-RT-006 | Logging uses `log/slog` with `text` or `json` format and `debug`/`info`/`warn`/`error` levels; entries carry a `role` attribute (`controller`/`agent`). | Implemented (untested) | Smoke test log |
 | REQ-RT-007 | Build metadata (`Version`, `Commit`) is injected with `-ldflags` and printed by `--version`; `/healthz` and the agent health endpoint report the version. | Implemented | Smoke test |
-| REQ-RT-008 | The `mobile` package exposes a gomobile-compatible API: `SetLogSink(LogSink)`, `Start(dataDir, configYAML, masterKey)`, `Stop(timeoutMillis)`, `IsRunning()`, `LastError()`, `Version()`. On Android only `controller` mode is accepted; the data dir is forced to the given app-private directory. | Implemented (untested) | Compiles for `android/arm64`; AAR not built yet |
+| REQ-RT-008 | The `mobile` package exposes a gomobile-compatible API: `SetLogSink(LogSink)`, `Start(dataDir, configYAML, masterKey)`, `Stop(timeoutMillis)`, `IsRunning()`, `LastError()`, `Version()`, plus Android account count/initial-account/password verification/change helpers. On Android only `controller` mode is accepted; the data dir is forced to the given app-private directory. `Start` creates and migrates the database before returning. | Implemented (untested on Android) | `mobile.TestInitialAccountLifecycleAndPasswordChange`, `TestStartStopRaceRemainsSerialized`; Android arm64 Go compile; AAR and device runtime not verified |
 | REQ-RT-009 | Data directory layout: `<data_dir>/homecore.db` (Controller DB), `<data_dir>/master.key`, `<agent.data_dir>/agent_id` (default `<data_dir>/agent`; only when the Agent has no supplied id, REQ-AG-016). Directories are created with mode `0700`, secret files with `0600`. | Implemented | `TestMasterKeyPersistsWithStrictPermissions`; manual permission check |
 | REQ-RT-010 | The binary builds with `CGO_ENABLED=0` for linux/amd64, linux/arm64, linux/arm, windows/amd64, darwin/arm64, darwin/amd64 and android/arm64 (`make cross`). | Implemented | `make cross` 2026-11-11 |
 | REQ-RT-011 | `homecore user add\|passwd\|list` subcommands share the server's configuration loading (`--config`, `--data-dir`, `HOMECORE_*`) and operate on the same `<data_dir>/homecore.db`; see [REQ-AUTH-015..018](authentication.md). The key `controller.auth.bootstrap_admin_user` no longer exists (removed 2026-11-14; a config that sets it fails strict validation). `controller.auth` keeps `access_token_ttl`, `refresh_token_ttl`, `login_rate_per_minute`, `api_rate_per_minute`. | Implemented | `TestUserDataDirFromEnvironment`, `TestLoadBytesRejectsUnknownFieldsAndBadValues/removed_bootstrap_key`, `TestShippedConfigFilesAreValid` |
@@ -37,6 +37,5 @@
 ## Known gaps
 
 - The `flag` declarations of the server command (`cmd/homecore` without a subcommand) are not unit-tested; the config merge they feed (`loadConfigWith`, agent flags and environment) is (REQ-AG-016/017), and so are the `user` subcommands (REQ-AUTH-015).
-- The `mobile` bindings expose no way to create accounts (no CLI on Android); to be designed with Phase 5. `mobile` still compiles for android/arm64.
-- The gomobile AAR has never been built; `make android-aar` needs gomobile and the Android NDK.
+- The gomobile AAR has not been built as an independent artifact; the Android application instead compiles the same HomeCore package inside the existing CGO bridge. This route still needs device/runtime validation.
 - Not measured yet: idle CPU/RAM (goal G-3) and long-running stability (goal G-2).

@@ -102,6 +102,25 @@ func TestRoutesAndPolicy(t *testing.T) {
 	}
 }
 
+func TestLoopbackPatchMethodOverride(t *testing.T) {
+	h := newTestHandler(t)
+	request := func(remote string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{}`))
+		req.RemoteAddr = remote
+		req.Header.Set("X-HomeCore-Method-Override", http.MethodPatch)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if got := request("127.0.0.1:12345").Code; got != http.StatusMethodNotAllowed {
+		t.Fatalf("loopback override reached POST login: got %d, want PATCH route 405", got)
+	}
+	if got := request("192.0.2.1:12345").Code; got != http.StatusNotImplemented {
+		t.Fatalf("non-loopback request must remain POST login: got %d, want 501 unimplemented envelope", got)
+	}
+}
+
 func TestHealthBodyAndSpec(t *testing.T) {
 	h := newTestHandler(t)
 

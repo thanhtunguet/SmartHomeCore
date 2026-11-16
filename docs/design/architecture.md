@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1 |
-| Last reviewed | 2026-11-15 (alerts, ADR-021; earlier: MCP server, ADR-020; earlier: portable Agent, ADR-019; earlier: 2026-11-14 service account keys; legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
+| Last reviewed | 2026-11-16 (Android mobile Controller integration; earlier: 2026-11-15 alerts, ADR-021; earlier: MCP server, ADR-020; earlier: portable Agent, ADR-019; earlier: 2026-11-14 service account keys; legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
 | Requirements | [requirements/overview.md](../requirements/overview.md) |
 | Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs) |
 | API contract | [api/openapi.yaml](../../api/openapi.yaml) (source of truth) |
@@ -402,8 +402,10 @@ adds `local_addresses` while preserving the legacy `local_ips` list. Implemented
   and later ones never block; a missing sample is reported as absent, never as `0`.
 - `system.Cached` (3 s TTL, set in `internal/app`) serves one snapshot per TTL to all callers, so
   polling cannot make the host work harder.
-- Android: the implementation is to be supplied by the Kotlin host through a gomobile callback
-  interface (Phase 5). `mobile` and `app.Options` were not changed in Phase 4.
+- Android: the Kotlin host persists a 32-byte master key using Android Keystore-backed encrypted
+  preferences and supplies the bytes through the existing combined Go/JNI bridge. `mobile.Start`
+  prepares and migrates the SQLite database before launching the Controller goroutine; account
+  onboarding/password changes use the same Go auth/storage packages. Device validation remains open.
 
 ### 6.11 Scheduler (`internal/scheduler`)
 `scheduler.Every(ctx, interval, jitter, fn)` — a ticker loop with jitter and panic recovery. No cron
@@ -561,9 +563,9 @@ Principles:
 3. Separate keys: JWT signing key ≠ Controller signing key ≠ master key.
 4. No plaintext secrets in the DB; no secrets in API responses or logs (the alert channel's bot token included).
 5. Shutdown writes `audit_log` `device.shutdown` (with the acting user). Wake/shutdown are throttled per device (ADR-012).
-6. Accounts are created and re-passworded with the `homecore user add|passwd|list` command (§10.1);
-   there is no default account and no password in the log. Android: the host app will call the same
-   code through `mobile` (to be designed with Phase 5; not exposed yet).
+6. Accounts are created and re-passworded with the `homecore user add|passwd|list` command (§10.1)
+   or through Android's Home Management screen calling the same Go auth/storage services through
+   `mobile`; there is no default account and no password in the log.
 7. Login is rate-limited per IP; generic error messages; argon2id with constant-time comparison; an
    unknown user costs the same as a wrong password (dummy hash).
 8. Long-lived client tokens exist only with the `legacy` scope and are refused (`403`) on every other operation; the spec, not the handlers, says which operations are legacy (tag `legacy`, `middleware.Requirement.Legacy`).
@@ -715,7 +717,10 @@ sequenceDiagram
 
 YAML file (`--config`), then `HOMECORE_*` environment overrides, then validation. See
 [configs/homecore.example.yaml](../../configs/homecore.example.yaml). Android passes the YAML string and
-its app-private data dir to `mobile.Start`.
+its app-private data dir to `mobile.Start`. Android's Kotlin host owns foreground-service lifecycle,
+boot startup, loopback binding, account onboarding and the Keystore-backed master key. The Android
+HTTP gateway remains a separate listener for camera/flashlight routes; the Controller is proxied only
+on loopback. These Android integration paths have not yet been device-validated.
 
 ---
 
