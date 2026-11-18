@@ -5,7 +5,7 @@
 | Brief | §3.1, §4, §6 (public API zone) |
 | Code | `internal/api` (`server.go`, `middleware/`, `handlers/`, `gen/`), `api/openapi.yaml`, `web/`; authentication: [authentication.md](authentication.md) |
 | Design | [architecture §6.1, §9, §10](../design/architecture.md), [ADR-006](../design/decisions.md#adr-006--spec-first-rest-api), [ADR-008](../design/decisions.md#adr-008--offline-swagger-ui) |
-| Last updated | 2026-11-15 (alert channel endpoints, REQ-API-032; MCP endpoint; earlier: 2026-11-14 service account keys; legacy device endpoints; local interface names; Phase 4: DDNS endpoints, Cloudflare lookups, system metrics; earlier: Phase 3 shutdown, controller key, activity feed, agent status) |
+| Last updated | 2026-11-18 (port forwarding endpoints, REQ-API-033); 2026-11-15 (alert channel endpoints, REQ-API-032; MCP endpoint; earlier: 2026-11-14 service account keys; legacy device endpoints; local interface names; Phase 4: DDNS endpoints, Cloudflare lookups, system metrics; earlier: Phase 3 shutdown, controller key, activity feed, agent status) |
 | Status | **Implemented**: foundation, authentication, devices, commands (wake and shutdown), controller key, activity feed, DDNS (incl. Cloudflare lookups) and system metrics. No documented operation returns `501` any more |
 
 ## Functional requirements
@@ -43,6 +43,7 @@
 | REQ-API-031 | The rotate endpoint is under `/api/v1/auth/`, so the per-IP limit of the credential endpoints applies (10/min, burst 5, `429 rate_limited`). | Implemented | `TestServiceKeyRotationIsRateLimitedLikeLogin` |
 | REQ-API-022 | Accounts are managed by the `homecore user add\|passwd` command (Phase 1b), not by the API or the UI; there is no first-run bootstrap account. | Implemented (`homecore user add\|passwd\|list`, REQ-AUTH-015..018) | `TestUserAddPasswdListEndToEnd` |
 | REQ-API-032 | **Alert channels** (REQ-ALERT-*): `GET/POST /alerts/channels` (`201`), `GET/PATCH/DELETE /alerts/channels/{id}` (`DELETE` `204`), `POST /alerts/channels/{id}/test` (`200`, REQ-ALERT-009). Every operation needs a session token (a scoped service account key gets `403`: no `x-token-scopes`), is validated against the spec, and a duplicate name is `409`. The secret is `writeOnly`; `has_secret` replaces it. Changes are audited (REQ-ALERT-010). | Implemented | `api.TestAlertChannelCRUDOverHTTP`, `TestAlertEndpointsRequireAuthentication`, `TestAlertEndpointsRefuseScopedKeys`, `TestAlertChannelTestEndpoint`, `TestAlertChannelAudit` |
+| REQ-API-033 | **Port forwarding** (REQ-PF-*): `GET/POST /port-forwards` (`201`), `GET/PATCH/DELETE /port-forwards/{id}` (`DELETE` `204`). `PATCH {"enabled": bool}` is the on/off switch. Every operation needs a session token (a scoped service account key gets `403`: no `x-token-scopes`) and is validated against the spec. `400` for an invalid field (all problems listed), `409` for a duplicate name or an overlap with another **enabled** rule, `404` for an unknown id. A rule that cannot listen is still `201`/`200` with `status: error` and `last_error`, not an HTTP error. Changes are audited (REQ-PF-010). | Implemented | `api.TestPortForwardCRUDAndSwitchOverHTTP`, `TestPortForwardErrors`, `TestPortForwardThatCannotBindShowsItsErrorAndRecovers`, `TestPortForwardEndpointsRequireASession`, `TestPortForwardAudit` |
 | REQ-API-024 | `GET /api/v1/system/controller-key` (`getControllerKey`, any authenticated user) returns exactly `key_id`, `algorithm` (`ed25519`) and the base64 `public_key` of the active Controller key (REQ-SHD-001/002); never the private key. `401` without a token. | Implemented | `TestControllerKeyEndpoint`, `TestAgentTrustingTheAPIKeyAcceptsTheDispatcher` |
 
 ## Endpoint implementation status
@@ -68,6 +69,7 @@ The full contract (brief §4 plus additions) is in `api/openapi.yaml`.
 | `POST /api/v1/ddns/cloudflare/zones`, `POST /api/v1/ddns/cloudflare/zones/{zone_id}/records` | Implemented (Phase 4) |
 | `GET/POST /api/v1/service-account-keys`, `DELETE /api/v1/service-account-keys/{id}`, `POST /api/v1/auth/service-key/rotate` | Implemented (ADR-018) |
 | `POST /api/v1/mcp` | Implemented (ADR-020; [mcp.md](mcp.md)) |
+| `GET/POST /api/v1/port-forwards`, `GET/PATCH/DELETE /api/v1/port-forwards/{id}` | Implemented (ADR-022; [port-forwarding.md](port-forwarding.md)) |
 | `GET/POST /api/v1/alerts/channels`, `GET/PATCH/DELETE /api/v1/alerts/channels/{id}`, `POST /api/v1/alerts/channels/{id}/test` | Implemented (ADR-021; [alerts.md](alerts.md)) |
 
 ## Known gaps
@@ -157,3 +159,12 @@ them stale until the owner regenerates them.
 `make generate` rewrote `internal/api/gen/api.gen.go`. The frontend's generated types
 (`frontend/src/api/generated`) were **not** regenerated (submodule untouched); `make ui-check-api`
 reports them stale until the owner runs `npm run gen:api`.
+
+## Spec change: port forwarding
+
+| Change | Why |
+|--------|-----|
+| New operations `listPortForwards`, `createPortForward`, `getPortForward`, `updatePortForward`, `deletePortForward`, a tag `port-forwards`, schemas `PortForward`, `PortForwardCreate`, `PortForwardUpdate`, `PortForwardProtocol` (`tcp`, `udp`, `universal`), `PortForwardStatus` (`running`, `stopped`, `error`) and parameter `PortForwardId` | REQ-API-033, REQ-PF-*, ADR-022. Additive; no existing operation changed. No new endpoint for the interface list: the UI reads `local_addresses` of `GET /system/metrics` |
+
+`make generate` rewrote `internal/api/gen/api.gen.go`, and the frontend's generated types were regenerated
+(`pnpm run gen:api`; `check:api` is clean).

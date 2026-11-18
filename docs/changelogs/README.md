@@ -5,6 +5,7 @@ that spans days uses its end date). Newest entries are listed first below.
 
 | Date | Entry | Summary |
 |------|-------|---------|
+| 2026-11-18 | [2026-11-18-port-forwarding.md](2026-11-18-port-forwarding.md) | Port forwarding (ADR-022): TCP/UDP/Universal relay rules with a local interface, a name and a stored on/off switch that is restored after a restart, `/port-forwards` API, Port Forwarding tab in the UI, migration `0009` |
 | 2026-11-15 | [2026-11-15-alerts-ui.md](2026-11-15-alerts-ui.md) | Settings card for alert channels (list, add/edit Telegram, events, pause, test, delete), API types regenerated, six alert endpoints in the contract test; real Telegram run skipped by the owner |
 | 2026-11-15 | [2026-11-15-alerts.md](2026-11-15-alerts.md) | Alerts (ADR-021): channels with a Telegram adapter (bot token + target user id, sealed), events for a new public IP, wake/shutdown requests and a status change outside HomeCore's control, queue with retries, test endpoint, migration `0008` |
 | 2026-11-15 | [2026-11-15-mcp-server.md](2026-11-15-mcp-server.md) | MCP server in the Controller (`POST /api/v1/mcp`, ADR-020): tools `list_devices`, `get_devices`, `control_device` (turn_on, turn_off, check_status), authenticated by any service account key, no per-tool permission |

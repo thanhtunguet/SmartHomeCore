@@ -34,6 +34,7 @@ import (
 	"github.com/thanhtunguet/homecore/internal/devices"
 	"github.com/thanhtunguet/homecore/internal/monitoring"
 	"github.com/thanhtunguet/homecore/internal/platform"
+	"github.com/thanhtunguet/homecore/internal/portforward"
 	"github.com/thanhtunguet/homecore/internal/secrets"
 	"github.com/thanhtunguet/homecore/internal/servicekey"
 	"github.com/thanhtunguet/homecore/internal/storage"
@@ -68,6 +69,9 @@ type devEnv struct {
 	// length of the test.
 	alerts *alerts.Service
 	tg     *alertstest.Telegram
+
+	// Port forwarding: the real service on loopback sockets, running for the length of the test.
+	pf *portforward.Service
 
 	mu      sync.Mutex
 	up      map[int]bool // monitor_port → reachable
@@ -175,6 +179,12 @@ func newDevEnvOpts(t *testing.T, mutate func(*config.Controller), realProbe bool
 	alertsDone := make(chan struct{})
 	go func() { defer close(alertsDone); _ = e.alerts.Run(alertsCtx) }()
 	t.Cleanup(func() { stopAlerts(); <-alertsDone })
+	e.pf = portforward.NewService(portforward.ServiceConfig{Repo: portforward.NewSQLiteRepository(db), Log: log,
+		RetryInterval: 50 * time.Millisecond})
+	pfCtx, stopPF := context.WithCancel(ctx)
+	pfDone := make(chan struct{})
+	go func() { defer close(pfDone); _ = e.pf.Run(pfCtx) }()
+	t.Cleanup(func() { stopPF(); <-pfDone })
 	e.ddnsSvc = ddns.NewService(ddns.ServiceConfig{Repo: ddns.NewSQLiteRepository(db), Sealer: sealer, DNS: cfClient, IP: e.ip,
 		Observer: alerts.IPHook{Svc: e.alerts}, Log: log})
 	e.metrics = &swapMetrics{p: &system.Cached{Provider: system.NewGopsutil(system.GopsutilConfig{DataDir: t.TempDir(), Started: time.Now()}), TTL: time.Second}}
@@ -211,7 +221,7 @@ func newDevEnvOpts(t *testing.T, mutate func(*config.Controller), realProbe bool
 		Config: cfg, Log: log, DB: db, Auth: authSvc, ServiceKeys: keySvc,
 		Devices: devSvc, Commands: e.engine, Monitor: e.mon, Audit: writer,
 		ControllerKey: key, Activity: activity.NewService(db), DDNS: e.ddnsSvc, Metrics: e.metrics,
-		Alerts: e.alerts,
+		Alerts: e.alerts, PortForward: e.pf,
 	})
 	if err != nil {
 		t.Fatal(err)

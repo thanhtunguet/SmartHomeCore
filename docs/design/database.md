@@ -3,10 +3,10 @@
 | | |
 |---|---|
 | Engine | SQLite 3 (embedded) via `modernc.org/sqlite` (pure Go, [ADR-004](decisions.md#adr-004--sqlite-driver-moderncorgsqlite-everywhere)) |
-| Schema version | `8` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`, `0003_users_no_roles.sql`, `0004_refresh_grace.sql`, `0005_agent_status.sql`, `0006_ddns_state.sql`, `0007_service_account_keys.sql`, `0008_alert_channels.sql`) |
+| Schema version | `9` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`, `0003_users_no_roles.sql`, `0004_refresh_grace.sql`, `0005_agent_status.sql`, `0006_ddns_state.sql`, `0007_service_account_keys.sql`, `0008_alert_channels.sql`, `0009_port_forward_rules.sql`) |
 | Owner role | Controller only. The Agent has no database |
 | Requirements | [storage-and-secrets.md](../requirements/storage-and-secrets.md) |
-| Last reviewed | 2026-11-15 (alerts: migration 0008; earlier: 2026-11-14 service account keys: migration 0007; Phase 4: migration 0006, DDNS observed state and record uniqueness; earlier: Phase 3 migration 0005) |
+| Last reviewed | 2026-11-18 (port forwarding: migration 0009); 2026-11-15 (alerts: migration 0008; earlier: 2026-11-14 service account keys: migration 0007; Phase 4: migration 0006, DDNS observed state and record uniqueness; earlier: Phase 3 migration 0005) |
 
 The DDL in `internal/storage/migrations/` is authoritative. This document explains it and must be
 updated in the same change as any new migration.
@@ -57,7 +57,7 @@ erDiagram
 ```
 
 Standalone tables: `audit_log` (references users/targets by value, so entries outlive deletions),
-`alert_channels`, `system_settings`, `schema_migrations`.
+`alert_channels`, `port_forward_rules`, `system_settings`, `schema_migrations`.
 
 Mapping from the brief's table list (§3.7):
 
@@ -73,6 +73,7 @@ Mapping from the brief's table list (§3.7):
 | `ddns_configs` | `ddns_configs` | |
 | `ddns_sync_history` | `ddns_sync_history` | |
 | — | `alert_channels` | Added (ADR-021): destinations for alerts (Telegram, ...) with their sealed secret |
+| — | `port_forward_rules` | Added (ADR-022): port forwarding rules with their stored on/off switch |
 | `system_settings` | `system_settings` | |
 | — | `audit_log` | Added: brief §6 requires an audit log for shutdown |
 | — | `schema_migrations` | Added: migration bookkeeping |
@@ -276,6 +277,25 @@ One alert destination per row (migration `0008`, [ADR-021](decisions.md#adr-021-
 
 Writers: `alerts.Service` (create/update/delete, sealed secret) and the delivery path (`RecordDelivery`, which
 touches only the three `last_*` columns). Pruning: none (a few rows, edited by the owner).
+
+### port_forward_rules
+
+One port forwarding rule per row (migration `0009`, [ADR-022](decisions.md#adr-022--port-forwarding-a-userspace-relay-driven-by-stored-rules), [port-forwarding.md](../requirements/port-forwarding.md)).
+
+| Column | Type | Null | Default | Constraint / note |
+|--------|------|------|---------|-------------------|
+| `id` | TEXT | no | | PK, UUIDv7 |
+| `name` | TEXT | no | | length 1..100; unique ignoring case (index `port_forward_rules_name`) |
+| `protocol` | TEXT | no | | `CHECK` in (`tcp`, `udp`, `universal`); `universal` = TCP and UDP on the same port |
+| `listen_address` | TEXT | no | `'0.0.0.0'` | canonical IP literal of a local interface; `0.0.0.0` = all IPv4, `::` = all. Syntax only: whether the host has it is decided at bind time |
+| `listen_port` | INTEGER | no | | 1..65535 |
+| `target_host` | TEXT | no | | IP literal or lower-case host name, length 1..253; resolved on every new connection |
+| `target_port` | INTEGER | no | | 1..65535 |
+| `enabled` | INTEGER | no | `1` | bool: the **desired** state, the on/off switch. The Controller starts every enabled rule at boot and retries the ones that cannot bind. Whether a listener is open now (`running`/`error`) is **not stored** |
+| `created_at`, `updated_at` | INTEGER | no | | unix ms |
+
+Overlap between enabled rules (same port, shared protocol, equal or wildcard address) is checked by the service, not by an index:
+a disabled rule must not reserve the socket. Writers: `portforward.Service` only. Pruning: none (a few rows, edited by the owner).
 
 ### ddns_configs
 

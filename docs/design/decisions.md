@@ -688,3 +688,66 @@ longer than the retries; a Controller that is down cannot alert about itself. A 
 message per change (no flap suppression beyond hysteresis). Messages are English. The frontend has no
 screen yet and its generated types are stale until regenerated. A live run against Telegram has not been done.
 
+---
+
+## ADR-022 — Port forwarding: a userspace relay driven by stored rules
+
+**Context.** The owner wants the Controller to forward ports: pick the local interface to listen on (default
+`0.0.0.0`), the connection type (TCP, UDP or "Universal" = both), give each rule a name, and switch each rule on
+and off, with the on/off state remembered so that a restart brings the enabled rules back. Port forwarding is not
+in the brief and not in the MVP list of the scope guardrails; it is added at the owner's request. It opens
+listening sockets on the host, so it must not weaken a security invariant, and it must run on every target the
+Controller runs on (Linux, macOS, Windows, Android), without CGO and without a new dependency.
+
+**Decision.**
+- **A relay inside the Controller process, in the standard library** (`internal/portforward`, `net` only). For
+  TCP: accept, dial the target, copy both ways with half-close. For UDP: one upstream socket per client address
+  so replies return to the right client, forgotten after 60 s of silence. A rule is the pair of sockets plus the
+  goroutines that serve them; stopping a rule closes the sockets and every relayed connection and waits for the
+  goroutines.
+- **Rules are rows of `port_forward_rules`** (migration `0009`) managed through the REST API (`/port-forwards`,
+  spec-first, session token only), like DDNS configurations and alert channels. `enabled` is the **desired**
+  state and is the only runtime-related column; whether a listener is open now is held in memory and reported as
+  `status`.
+- **Restart is a reconcile, not a replay.** `Service.Run` lists the rules and starts the enabled ones, then every
+  15 s starts any enabled rule that is not listening. A bind failure (port in use, interface not up at boot, no
+  privilege) is a rule state (`error` plus the reason), never a Controller failure, and is retried: after a boot
+  where the network comes up late, the rules come up by themselves. Nothing listens before `Run` is called.
+- **`protocol` is `tcp`, `udp` or `universal`** (the owner's word for both). A `universal` rule binds TCP and UDP
+  on the same port number and relays each to the target port; it is all-or-nothing.
+- **The listen address is an IP literal, validated for syntax only.** It is not checked against the host's
+  interfaces on save, so a rule for an address that is down at boot can still be saved and is retried; the UI
+  fills the choice from `local_addresses` of the metrics endpoint (no new endpoint). IPv4 literals bind with the
+  `tcp4`/`udp4` networks so `0.0.0.0` stays IPv4, as written.
+- **Overlap and loop checks in the service**, under the same lock that starts the rule: two enabled rules cannot
+  take the same socket, and a rule cannot forward a port to itself. A disabled rule reserves nothing.
+- **Limits per rule** (512 TCP connections, 256 UDP clients, 5 s connect timeout, 64 KiB datagrams) so a flood or
+  a dead target cannot exhaust file descriptors or memory on a small host.
+- **Session only.** The operations have no `x-token-scopes`, so a service account key (`legacy`, `mcp`) gets `403`:
+  an AI agent or a legacy client cannot open a port. Audit `port_forward.create|update|enable|disable|delete`
+  with the acting user.
+
+**Security consequences (accepted, recorded).**
+- A rule makes the Controller host a relay: anyone who can reach the listen port reaches the target, with the
+  Controller's network position. There is no source allow-list and no authentication on the relayed port. The
+  default `0.0.0.0` exposes it on every interface, as asked.
+- A rule may target loopback or any address the Controller can reach, so it can expose a service that listens only
+  on the host. That is the point of the feature, and it is why the operations are session-only. Because there are
+  no roles (ADR-011), every signed-in user can do it; for a household of fewer than ten trusted users this is the
+  same trust as shutting machines down.
+- The packaged systemd unit has `CapabilityBoundingSet=` empty, so ports below 1024 fail with "permission denied"
+  (shown as the rule's error). We do **not** widen the unit for everyone; `deploy/README.md` gives an opt-in
+  drop-in with `CAP_NET_BIND_SERVICE`.
+
+**Alternatives considered.** *Drive `iptables`/`nftables`/`pf`*: needs root and a different implementation per OS,
+cannot run on Android, and the Controller runs unprivileged by design. *`socat` or another external process*: a
+dependency to install, supervise and keep in sync with the database. *Store `status` in the database*: it would be
+stale after a crash and forces a write on every retry; the desired state is the only fact worth storing.
+*Check the listen address against the interfaces on save*: rejects a rule for an interface that is down at boot,
+which is exactly when persistence matters. *Refuse loopback targets*: forbids the common use (publish a local-only
+service on a LAN port) and would not stop a determined user. *A role for port forwarding*: ADR-011.
+
+**Consequences.** One more table and one more `errgroup` member. A TCP rule is a user-space copy, so it is slower
+than kernel forwarding and the target sees the Controller's address, not the client's (no PROXY protocol). Changing
+a rule's listener or target drops its connections. Established connections do not survive a Controller restart.
+Rules are not verified on Linux, Android or with IPv6 sockets yet (REQ-PF known gaps).

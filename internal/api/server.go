@@ -32,6 +32,7 @@ import (
 	"github.com/thanhtunguet/homecore/internal/httpx"
 	"github.com/thanhtunguet/homecore/internal/monitoring"
 	"github.com/thanhtunguet/homecore/internal/platform"
+	"github.com/thanhtunguet/homecore/internal/portforward"
 	"github.com/thanhtunguet/homecore/internal/servicekey"
 	"github.com/thanhtunguet/homecore/internal/storage"
 	"github.com/thanhtunguet/homecore/web"
@@ -70,6 +71,8 @@ type Deps struct {
 	Metrics platform.MetricsProvider // GET /system/metrics; nil answers 501
 
 	Alerts *alerts.Service // alert channel endpoints; nil answers 501
+
+	PortForward *portforward.Service // port forwarding endpoints; nil answers 501
 }
 
 // Server is the Controller HTTP server.
@@ -168,6 +171,7 @@ func newRouter(d Deps) (http.Handler, error) {
 	h.ControllerKey, h.Activity = d.ControllerKey, d.Activity
 	h.DDNS, h.Metrics = d.DDNS, d.Metrics
 	h.Alerts = d.Alerts
+	h.PortForward = d.PortForward
 	throttle := middleware.NewDeviceThrottle(DeviceCommandInterval)
 	h.Throttle = throttle
 	h.Info = handlers.InfoSource{Mode: string(d.Mode), Controller: d.Config}

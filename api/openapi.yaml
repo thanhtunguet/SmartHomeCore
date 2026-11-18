@@ -54,6 +54,8 @@ tags:
   - name: ddns
   - name: alerts
     description: Alert channels (Telegram, more later) that tell the owner about IP changes, power commands and unexpected device status changes.
+  - name: port-forwards
+    description: TCP/UDP port forwarding rules run by the Controller (ADR-022).
   - name: service-keys
     description: Service account keys for legacy clients and AI agents (ADR-018).
   - name: legacy
@@ -848,6 +850,103 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/v1/port-forwards:
+    get:
+      tags: [port-forwards]
+      operationId: listPortForwards
+      summary: List port forwarding rules
+      responses:
+        "200":
+          description: Rules, ordered by name (case-insensitive)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PortForward" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [port-forwards]
+      operationId: createPortForward
+      summary: Add a port forwarding rule
+      description: |
+        The Controller listens on `listen_address:listen_port` and relays every TCP connection
+        and/or UDP datagram to `target_host:target_port` (ADR-022). `protocol` is `tcp`, `udp` or
+        `universal` (both, on the same port). An enabled rule starts at once; the `201` carries the
+        outcome in `status` (`running`, or `error` with the reason in `last_error`, for example the
+        port is already in use). A rule that cannot start stays `enabled` and is retried
+        periodically, so it also comes up after a restart once the port or interface is available.
+
+        `listen_address` is an IP literal (default `0.0.0.0`: every IPv4 interface). It is not checked
+        against the host's interfaces when the rule is saved: an address that is not available makes
+        the rule `error` until it is. Two **enabled** rules cannot overlap on the same port, protocol
+        and address (`409`); a disabled rule reserves nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PortForwardCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PortForward" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/port-forwards/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PortForwardId"
+    get:
+      tags: [port-forwards]
+      operationId: getPortForward
+      summary: Get one port forwarding rule
+      responses:
+        "200":
+          description: The rule
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PortForward" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [port-forwards]
+      operationId: updatePortForward
+      summary: Update a port forwarding rule (partial)
+      description: |
+        `enabled` is the on/off switch: `false` closes the listeners (established connections are
+        dropped), `true` opens them. The state is stored, so the Controller restores it after a
+        restart. A change of any other field restarts a running rule. Omitted fields are unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PortForwardUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PortForward" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [port-forwards]
+      operationId: deletePortForward
+      summary: Delete a port forwarding rule
+      description: Closes the listeners first, then removes the rule.
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/turn-on:
     get:
       tags: [legacy, devices]
@@ -997,6 +1096,11 @@ components:
       required: true
       schema: { type: string, format: uuid }
     AlertChannelId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PortForwardId:
       name: id
       in: path
       required: true
@@ -1663,6 +1767,59 @@ components:
         result: { type: string, enum: [sent, failed] }
         sent_at: { type: string, format: date-time }
         error: { type: string, description: Present when `result` is `failed`; never contains the secret. }
+
+    PortForwardProtocol:
+      type: string
+      enum: [tcp, udp, universal]
+      description: "`universal` listens for TCP **and** UDP on the same port."
+
+    PortForwardStatus:
+      type: string
+      enum: [running, stopped, error]
+      description: |
+        What the Controller is doing now, not what is stored. `running`: listening. `stopped`: the
+        rule is disabled (or the Controller has not started it yet). `error`: the rule is enabled but
+        could not listen (reason in `last_error`); it is retried every 15 seconds.
+
+    PortForward:
+      type: object
+      required: [id, name, protocol, listen_address, listen_port, target_host, target_port, enabled, status, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        protocol: { $ref: "#/components/schemas/PortForwardProtocol" }
+        listen_address: { type: string, example: 0.0.0.0, description: "IP address of a local interface; `0.0.0.0` (or `::`) = all." }
+        listen_port: { type: integer, minimum: 1, maximum: 65535 }
+        target_host: { type: string, example: 192.168.1.20, description: "IP address or host name." }
+        target_port: { type: integer, minimum: 1, maximum: 65535 }
+        enabled: { type: boolean, description: "The stored on/off switch; restored after a restart." }
+        status: { $ref: "#/components/schemas/PortForwardStatus" }
+        last_error: { type: string, description: "Why the rule is in `error`; absent otherwise." }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    PortForwardCreate:
+      type: object
+      required: [name, protocol, listen_port, target_host, target_port]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100, description: "Unique, ignoring case." }
+        protocol: { $ref: "#/components/schemas/PortForwardProtocol" }
+        listen_address: { type: string, default: 0.0.0.0 }
+        listen_port: { type: integer, minimum: 1, maximum: 65535 }
+        target_host: { type: string, minLength: 1, maxLength: 253 }
+        target_port: { type: integer, minimum: 1, maximum: 65535 }
+        enabled: { type: boolean, default: true }
+
+    PortForwardUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        protocol: { $ref: "#/components/schemas/PortForwardProtocol" }
+        listen_address: { type: string }
+        listen_port: { type: integer, minimum: 1, maximum: 65535 }
+        target_host: { type: string, minLength: 1, maxLength: 253 }
+        target_port: { type: integer, minimum: 1, maximum: 65535 }
+        enabled: { type: boolean }
 
     CloudflareLookup:
       type: object

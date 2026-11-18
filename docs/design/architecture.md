@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1 |
-| Last reviewed | 2026-11-15 (alerts, ADR-021; earlier: MCP server, ADR-020; earlier: portable Agent, ADR-019; earlier: 2026-11-14 service account keys; legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
+| Last reviewed | 2026-11-18 (port forwarding, ADR-022); 2026-11-15 (alerts, ADR-021; earlier: MCP server, ADR-020; earlier: portable Agent, ADR-019; earlier: 2026-11-14 service account keys; legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
 | Requirements | [requirements/overview.md](../requirements/overview.md) |
 | Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs) |
 | API contract | [api/openapi.yaml](../../api/openapi.yaml) (source of truth) |
@@ -443,6 +443,36 @@ monitoring.Monitor ──DeviceTransitioned────▶ alerts.StatusHook ─
   the queue is lost on stop. Secrets: the bot token is sealed, write-only, and kept out of errors (the Bot API
   URL contains it, so the adapter strips URLs and scrubs replies).
 
+### 6.13 Port forwarding (`internal/portforward`)
+Implemented ([requirements/port-forwarding.md](../requirements/port-forwarding.md), [ADR-022](decisions.md#adr-022--port-forwarding-a-userspace-relay-driven-by-stored-rules)).
+
+```
+REST /port-forwards ─▶ Service (one mutex)            ┌─ runner per enabled rule that is listening ─────────────┐
+   create/update/delete │  validate, overlap + loop    │  TCP: Accept ─▶ dial target ─▶ copy both ways (half-close)│
+   PATCH {enabled}      │  repo (port_forward_rules)   │  UDP: ReadFrom ─▶ per-client upstream socket ─▶ replies   │
+                        │  apply(rule): start/stop     └───────────────────────────────────────────────────────────┘
+Service.Run(ctx): start every enabled rule, then every 15 s retry the enabled ones that are not listening;
+                  on cancel close every listener and connection and wait for the goroutines.
+```
+
+- **Desired vs actual.** `enabled` (stored) is what the owner wants; `status` (`running`, `stopped`, `error`) is
+  what is true now, held in memory (`running` map and a per-rule error string) and returned with every rule. A
+  restart therefore needs no replay: `Run` reconciles the stored switch with the sockets.
+- **One mutex serialises every change** (CRUD and starting or stopping a runner), so the overlap check and the
+  bind that follows it cannot interleave. Binding is synchronous inside `Create`/`Update`, so the API answer
+  already carries the outcome (`error` with the bind failure).
+- **`apply(rule)`** makes the runner match the rule: disabled → stop; same relay (protocol, listen, target) →
+  keep, so a rename drops nothing; otherwise stop and start. Before `Run` there is no context and `apply` does
+  nothing.
+- **Runner.** `start` binds the TCP listener and/or the UDP socket (`tcp4`/`udp4` for IPv4 literals, so
+  `0.0.0.0` is IPv4 only; `::` dual stack), all-or-nothing, then serves in goroutines tracked by a `WaitGroup`.
+  `stop` cancels the context, closes the listeners and every tracked connection and waits. UDP keeps a table of
+  client address → upstream socket; a reply goroutine per client ends after 60 s of silence.
+- **Limits** per rule: 512 TCP connections, 256 UDP clients, 5 s dial timeout, 64 KiB datagrams.
+- **No new component dependencies:** `portforward` imports only the standard library, `uuid` and `storage`;
+  the handlers translate its errors (`ValidationError` 400, `ConflictError`/`ErrNameTaken` 409, `ErrNotFound` 404).
+  It runs in the Controller role only.
+
 ---
 
 ## 7. Data model (SQLite)
@@ -450,9 +480,9 @@ monitoring.Monitor ──DeviceTransitioned────▶ alerts.StatusHook ─
 Full specification (tables, columns, constraints, indexes, conventions, migration process):
 **[database.md](database.md)**. Authoritative DDL: `internal/storage/migrations/`.
 
-Summary: 13 STRICT tables in five groups. **Identity**: `users`, `refresh_tokens`, `service_account_keys`. **Devices**:
+Summary: 14 STRICT tables in six groups. **Identity**: `users`, `refresh_tokens`, `service_account_keys`. **Devices**:
 `devices`, `agent_bindings`, `device_status_history`. **Operations**: `commands`, `audit_log`,
-`controller_keys`. **DDNS and settings**: `ddns_configs`, `ddns_sync_history`, `system_settings`. **Alerts**: `alert_channels`.
+`controller_keys`. **DDNS and settings**: `ddns_configs`, `ddns_sync_history`, `system_settings`. **Alerts**: `alert_channels`. **Port forwarding**: `port_forward_rules`.
 `schema_migrations` belongs to the migration runner. The brief's `agent_credentials` is split into
 `agent_bindings` (per device) and `controller_keys` (per Controller), because with Ed25519 the
 secret material belongs to the Controller, not the device.
@@ -526,6 +556,7 @@ Namespace `/api/v1`; full contract in `api/openapi.yaml`. Summary (brief §4, pl
 | GET/POST | `/api/v1/ddns` | user |
 | ✚PATCH/DELETE | `/api/v1/ddns/{id}` | user |
 | POST | `/api/v1/ddns/{id}/sync` | user |
+| ✚GET/POST | `/api/v1/port-forwards` · ✚GET/PATCH/DELETE `/port-forwards/{id}` | user (session only; scoped keys get `403`); `enabled` is the on/off switch |
 | ✚GET/POST | `/api/v1/alerts/channels` · ✚GET/PATCH/DELETE `/alerts/channels/{id}` · ✚POST `/alerts/channels/{id}/test` | user (session only; scoped keys get `403`) |
 | ✚POST | `/api/v1/ddns/cloudflare/zones` · `/ddns/cloudflare/zones/{zone_id}/records` | user; read-only lookups for the form dropdowns (`POST` so the token stays out of URLs) |
 | GET | `/healthz`, `/readyz`, `/api/openapi.json`, `/api/docs` | public |
