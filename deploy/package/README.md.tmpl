@@ -300,6 +300,23 @@ sudo systemctl start homecore-controller
 commands you run by hand must use the same directory (`HOMECORE_DATA_DIR=/srv/homecore` or `--data-dir`).
 Verify: `sudo ls -l /srv/homecore/homecore.db` and `journalctl -u homecore-controller -n 20` shows the new `data_dir`.
 
+## Port forwarding below port 1024 (optional)
+
+The Controller can forward ports (web UI: **Port Forwarding**). The shipped unit drops every capability, so a rule on a
+port below 1024 (80, 443, 22 ...) shows `permission denied`; ports from 1024 up work as they are. To allow low ports:
+
+```bash
+sudo systemctl edit homecore-controller
+# [Service]
+# AmbientCapabilities=CAP_NET_BIND_SERVICE
+# CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+sudo systemctl restart homecore-controller
+```
+
+A rule on `0.0.0.0` is reachable from every network of the host: restrict it with the host firewall or choose a
+specific interface in the rule. Enabled rules start again after a restart and are retried every 15 s while they cannot
+bind.
+
 ## Troubleshooting
 
 | Symptom | Check |

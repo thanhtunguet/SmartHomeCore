@@ -258,6 +258,16 @@ func message(r Raw, d details) string {
 		return "Alert channel " + firstNonEmpty(d.Name, "a channel") + " updated"
 	case "alert_channel.delete":
 		return "Alert channel " + firstNonEmpty(d.Name, "a channel") + " deleted"
+	case "port_forward.create":
+		return "Port forwarding rule " + firstNonEmpty(d.Name, "a rule") + " created"
+	case "port_forward.update":
+		return "Port forwarding rule " + firstNonEmpty(d.Name, "a rule") + " updated"
+	case "port_forward.enable":
+		return "Port forwarding rule " + firstNonEmpty(d.Name, "a rule") + " switched on"
+	case "port_forward.disable":
+		return "Port forwarding rule " + firstNonEmpty(d.Name, "a rule") + " switched off"
+	case "port_forward.delete":
+		return "Port forwarding rule " + firstNonEmpty(d.Name, "a rule") + " deleted"
 	case "alert_channel.test":
 		if failed {
 			return "Test message to alert channel " + firstNonEmpty(d.Name, "a channel") + " failed"

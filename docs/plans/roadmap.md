@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | Brief §7 (phases), §8 (MVP); [architecture](../design/architecture.md) |
-| Last updated | 2026-11-15 (alerts UI; earlier: alerts backend; MCP server; earlier: 2026-11-14 service account keys; legacy endpoints; build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
+| Last updated | 2026-11-18 (port forwarding; earlier: 2026-11-15 alerts UI; earlier: alerts backend; MCP server; earlier: 2026-11-14 service account keys; legacy endpoints; build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
 
 Legend: `[x]` done and verified · `[~]` partially done · `[ ]` not started.
 Tick items in the same change that completes them, and add a changelog entry.
@@ -114,6 +114,17 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [ ] Run once against the real Cloudflare API and the real public-IP providers
 - [ ] Run the metrics on a Linux host (only macOS was run; Linux is covered by `make cross`)
 
+## Port forwarding (ADR-022)
+
+- [x] Migration `0009` (`port_forward_rules`), `internal/portforward`: TCP and UDP relay, `tcp`/`udp`/`universal`, local interface (default `0.0.0.0`), named rules, stored on/off switch (REQ-PF-001..009)
+- [x] Enabled rules restart with the Controller and are retried while they cannot bind (REQ-PF-007); smoke-tested with the built binary across `kill -9` and a restart
+- [x] `/port-forwards` CRUD in the spec and the handlers, session-only, audited, in the activity feed (REQ-API-033, REQ-PF-010/011)
+- [x] UI: sidebar/mobile/palette tile and the Port Forwarding screen with switch, interface picker and form (REQ-UI-031)
+- [x] `deploy/README.md` and the package README: opt-in drop-in for ports below 1024
+- [ ] Run on a Linux host (and the packaged systemd unit with and without the capability drop-in), on Android, and with a real IPv6 listener
+- [ ] Open the screen in a browser (switch, form, interface picker, mobile bar with seven tabs)
+- [ ] Frontend submodule: commit in HomeCoreUI and bump the pointer
+
 ## Legacy compatibility (ADR-017)
 
 - [x] `GET /api/turn-on`, `/api/turn-off`, `/api/is-online` with `?device=` (id or name), over the wake/shutdown services (REQ-API-026/027)
@@ -194,6 +205,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 | Shorten the deadline sweep (5 s) or complete deadline exactly via a timer, if second-level accuracy of `timed_out` ever matters | REQ-CMD-006 |
 | Alerts not asked for yet: DDNS sync that keeps failing, command timed out/completed, agent became `unreachable`; flap suppression and quiet hours; Vietnamese or templated messages; an alert history instead of only `last_*` | REQ-ALERT known gaps |
 | Persist undelivered alerts across a restart (outbox), only if losing them ever matters | ADR-021, REQ-ALERT-007 |
+| Port forwarding: source-address allow-list per rule, per-rule traffic figures and a live connection list, `listen_address` offered from a dedicated endpoint instead of the metrics, PROXY protocol so the target sees the client address, a rule that follows a device (target by device id) | REQ-PF known gaps, ADR-022 |
 | Endpoint for `ddns_sync_history` (the UI sees only the `last_*` fields and the activity feed) | REQ-DDNS known gaps |
 | Sub-tick backoff (the syncer ticks every 5 s, so a 1 s retry waits for the next tick); make the tick a config key if it matters | REQ-DDNS known gaps |
 | ~~Revoke one legacy token~~ solved for new integrations by service account keys (ADR-018); the HS256 legacy tokens still die only with their account. `homecore user disable\|enable\|delete` is still missing (set `disabled` with SQL) | ADR-017, ADR-018, REQ-AUTH-020 |

@@ -59,6 +59,25 @@ Notes
 - Distros with polkit < 0.106 (old Debian/Ubuntu) need an equivalent `.pkla` file instead of JS rules.
 - Keep the agent port closed to the Internet (firewall to the LAN / VPN subnet).
 
+## Port forwarding on ports below 1024 (optional)
+
+Port forwarding rules (UI: **Port Forwarding**, [ADR-022](../docs/design/decisions.md)) listen from the Controller
+process. The shipped unit drops every capability (`CapabilityBoundingSet=` is empty), so a rule on a port below 1024
+(80, 443, 22 ...) shows `error: ... permission denied`. Ports from 1024 up need nothing. The unit is deliberately
+left as it is; opt in with a drop-in:
+
+```bash
+sudo systemctl edit homecore-controller      # creates /etc/systemd/system/homecore-controller.service.d/override.conf
+# [Service]
+# AmbientCapabilities=CAP_NET_BIND_SERVICE
+# CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+sudo systemctl restart homecore-controller   # enabled rules start again by themselves
+```
+
+A rule listening on `0.0.0.0` is reachable from every network the host is on: open the port in the host firewall
+only for the networks that should use it, or pick a specific local interface in the rule. A rule that cannot bind is
+retried every 15 seconds, so it also comes up when the port or the interface becomes available later.
+
 ## nginx in front of the Controller (optional)
 
 [nginx/homecore.conf.template](nginx/homecore.conf.template) serves the built frontend (the `web/static`

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | [`BRIEF.md`](../../BRIEF.md) (Technical Brief v0.1, Vietnamese) |
-| Last reviewed | 2026-11-15 (alerts; MCP server); 2026-11-14 (service account keys) |
+| Last reviewed | 2026-11-18 (port forwarding); 2026-11-15 (alerts; MCP server); 2026-11-14 (service account keys) |
 | Owner | Project maintainers |
 
 This document turns the brief into the project's requirements baseline. It records which brief
@@ -61,6 +61,7 @@ One build supports both roles; configuration selects `controller`, `agent` or `b
 | Legacy single-device API (added after the brief, not in it) | **Implemented**: `GET /api/turn-on\|turn-off\|is-online?device=`, long-lived scoped tokens (`homecore token create`), URLs in the device sheet (ADR-017) | [http-api.md](http-api.md) REQ-API-026..028, [authentication.md](authentication.md) REQ-AUTH-019/020 |
 | Service account keys (added after the brief, not in it) | **Implemented**: server-generated Ed25519 keys (private key sealed in the database), TTL default 1 year, scopes `legacy`/`mcp`, create/list/revoke by a user, self-rotation by the key with a 1-minute grace and idempotent retry, audit (ADR-018) | [authentication.md](authentication.md) REQ-AUTH-021..027, [http-api.md](http-api.md) REQ-API-029..031, [storage-and-secrets.md](storage-and-secrets.md) REQ-SEC-006 |
 | Alerts (added after the brief, not in it) | **Implemented**: alert channels with a Telegram adapter (bot token + target user id, sealed), events for a new public IP, wake/shutdown requests and a device that changes status outside HomeCore's control, delivery queue with retries, test endpoint, audit; not yet run against the real Telegram (ADR-021) | [alerts.md](alerts.md), [http-api.md](http-api.md) REQ-API-032, [storage-and-secrets.md](storage-and-secrets.md) REQ-SEC-007 |
+| Port forwarding (added after the brief, not in it) | **Implemented**: rules that make the Controller relay TCP and/or UDP (`tcp`, `udp`, `universal`) from a chosen local interface (default `0.0.0.0`) to a target; each rule is named and has a stored on/off switch; enabled rules are restarted after a Controller restart and retried while they cannot bind; session-only API, audit; not yet run on Linux or in a browser (ADR-022) | [port-forwarding.md](port-forwarding.md), [http-api.md](http-api.md) REQ-API-033 |
 | Swagger UI at `/api/docs` | **Implemented** | [http-api.md](http-api.md) |
 | Static file serving | **Implemented** (UI embedded via `make build-full`; placeholder otherwise) | [http-api.md](http-api.md), [web-ui.md](web-ui.md) |
 
@@ -86,6 +87,7 @@ has a stable ID, a status and the test that verifies it.
 | [ddns.md](ddns.md) | `REQ-DDNS`, `REQ-SYS` | §3.6 (DDNS), §3.8 (system metrics), §6.4 |
 | [mcp.md](mcp.md) | `REQ-MCP` | not in the brief: MCP server for AI agents (ADR-020) |
 | [alerts.md](alerts.md) | `REQ-ALERT` | not in the brief: alert channels and Telegram (ADR-021) |
+| [port-forwarding.md](port-forwarding.md) | `REQ-PF` | not in the brief: TCP/UDP port forwarding rules (ADR-022) |
 | [web-ui.md](web-ui.md) | `REQ-UI` | §3.1 (static frontend), UI for §3.3–3.6 |
 
 Status vocabulary used everywhere:

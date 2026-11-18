@@ -23,6 +23,7 @@ import (
 	"github.com/thanhtunguet/homecore/internal/ddns"
 	"github.com/thanhtunguet/homecore/internal/devices"
 	"github.com/thanhtunguet/homecore/internal/monitoring"
+	"github.com/thanhtunguet/homecore/internal/portforward"
 	"github.com/thanhtunguet/homecore/internal/retention"
 	"github.com/thanhtunguet/homecore/internal/secrets"
 	"github.com/thanhtunguet/homecore/internal/servicekey"
@@ -132,6 +133,9 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 		Repo: alerts.NewSQLiteRepository(db), Sealer: sealer, Log: log.With("component", "alerts"),
 		Adapters: map[string]alerts.Factory{alerts.TypeTelegram: alerts.TelegramFactory("", nil)},
 	})
+	pfSvc := portforward.NewService(portforward.ServiceConfig{
+		Repo: portforward.NewSQLiteRepository(db), Log: log.With("component", "portforward"),
+	})
 	engine := commands.NewEngine(commands.Config{
 		Repo:             cmdRepo,
 		Issued:           alerts.CommandHook{Svc: alertSvc},
@@ -202,6 +206,7 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 		DDNS:            ddnsSvc,
 		Metrics:         metrics,
 		Alerts:          alertSvc,
+		PortForward:     pfSvc,
 	})
 	if err != nil {
 		return err
@@ -216,6 +221,7 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 	g.Go(func() error { return health.Run(gctx) })   // agent status (healthz) once a minute
 	g.Go(func() error { return syncer.Run(gctx) })   // Cloudflare DDNS
 	g.Go(func() error { return alertSvc.Run(gctx) }) // alert delivery (Telegram, ...)
+	g.Go(func() error { return pfSvc.Run(gctx) })    // port forwarding: restores the enabled rules
 	return g.Wait()
 }
 

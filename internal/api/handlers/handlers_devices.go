@@ -22,6 +22,7 @@ import (
 	"github.com/thanhtunguet/homecore/internal/devices"
 	"github.com/thanhtunguet/homecore/internal/httpx"
 	"github.com/thanhtunguet/homecore/internal/page"
+	"github.com/thanhtunguet/homecore/internal/portforward"
 )
 
 // ListDevices returns a page of devices ordered by name (case-insensitive).
@@ -348,6 +349,8 @@ func (h *Handlers) apiError(w http.ResponseWriter, r *http.Request, op string, e
 	var dverr *ddns.ValidationError
 	var cferr *ddns.CloudflareError
 	var averr *alerts.ValidationError
+	var pverr *portforward.ValidationError
+	var pcerr *portforward.ConflictError
 	switch {
 	case errors.Is(err, errUnauthenticated):
 		httpx.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
@@ -367,6 +370,12 @@ func (h *Handlers) apiError(w http.ResponseWriter, r *http.Request, op string, e
 		httpx.WriteError(w, http.StatusNotFound, "not_found", "alert channel not found")
 	case errors.Is(err, alerts.ErrNameTaken):
 		httpx.WriteError(w, http.StatusConflict, "conflict", err.Error())
+	case errors.As(err, &pverr):
+		httpx.WriteError(w, http.StatusBadRequest, "bad_request", pverr.Error())
+	case errors.As(err, &pcerr), errors.Is(err, portforward.ErrNameTaken):
+		httpx.WriteError(w, http.StatusConflict, "conflict", err.Error())
+	case errors.Is(err, portforward.ErrNotFound):
+		httpx.WriteError(w, http.StatusNotFound, "not_found", "port forwarding rule not found")
 	case errors.Is(err, devices.ErrNotFound):
 		httpx.WriteError(w, http.StatusNotFound, "not_found", "device not found")
 	case errors.Is(err, commands.ErrNotFound):

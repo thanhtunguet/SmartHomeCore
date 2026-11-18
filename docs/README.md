@@ -25,6 +25,7 @@ docs/
 | [ddns.md](requirements/ddns.md) | `REQ-DDNS`, `REQ-SYS`: public-IP quorum, Cloudflare client, DDNS configs and syncer, system metrics |
 | [shutdown-agent.md](requirements/shutdown-agent.md) | `REQ-AG`: signed commands, replay protection, least-privilege execution |
 | [alerts.md](requirements/alerts.md) | `REQ-ALERT`: alert channels (Telegram), events for IP change, wake/shutdown and out-of-control status changes, delivery |
+| [port-forwarding.md](requirements/port-forwarding.md) | `REQ-PF`: TCP/UDP port forwarding rules, local interface, stored on/off switch, restore after restart |
 | [mcp.md](requirements/mcp.md) | `REQ-MCP`: MCP server for AI agents (`POST /api/v1/mcp`), tools, authentication by service account key |
 | [web-ui.md](requirements/web-ui.md) | `REQ-UI`: frontend submodule, embedded build, session, flows against the REST API |
 

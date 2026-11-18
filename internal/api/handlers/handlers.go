@@ -22,6 +22,7 @@ import (
 	"github.com/thanhtunguet/homecore/internal/httpx"
 	"github.com/thanhtunguet/homecore/internal/monitoring"
 	"github.com/thanhtunguet/homecore/internal/platform"
+	"github.com/thanhtunguet/homecore/internal/portforward"
 	"github.com/thanhtunguet/homecore/internal/servicekey"
 	"github.com/thanhtunguet/homecore/internal/storage"
 	"github.com/thanhtunguet/homecore/internal/version"
@@ -58,6 +59,8 @@ type Handlers struct {
 	Metrics platform.MetricsProvider // GET /system/metrics (nil: 501)
 
 	Alerts *alerts.Service // alert channels (nil: 501)
+
+	PortForward *portforward.Service // port forwarding rules (nil: 501)
 }
 
 var _ gen.ServerInterface = (*Handlers)(nil)
