@@ -1,13 +1,13 @@
 # HomeCore — Architecture Design
 
-| | |
-|---|---|
-| Status | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1 |
-| Last reviewed | 2026-11-18 (port forwarding, ADR-022); 2026-11-16 (Android mobile Controller integration); 2026-11-15 (alerts, ADR-021; earlier: MCP server, ADR-020; earlier: portable Agent, ADR-019; earlier: 2026-11-14 service account keys; legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
-| Requirements | [requirements/overview.md](../requirements/overview.md) |
-| Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs) |
-| API contract | [api/openapi.yaml](../../api/openapi.yaml) (source of truth) |
-| Roadmap | [plans/roadmap.md](../plans/roadmap.md) |
+|                |                                                                                                                                                                                                                                                                                                                                                                                                                 |
+|----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Status         | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1                                                                                                                                                                                                                                                                                                                                                        |
+| Last reviewed  | 2026-11-18 (port forwarding, ADR-022); 2026-11-16 (Android mobile Controller integration); 2026-11-15 (alerts, ADR-021; earlier: MCP server, ADR-020; earlier: portable Agent, ADR-019; earlier: 2026-11-14 service account keys; legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
+| Requirements   | [requirements/overview.md](../requirements/overview.md)                                                                                                                                                                                                                                                                                                                                                         |
+| Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs)                                                                                                                                                                                                                                                                                                       |
+| API contract   | [api/openapi.yaml](../../api/openapi.yaml) (source of truth)                                                                                                                                                                                                                                                                                                                                                    |
+| Roadmap        | [plans/roadmap.md](../plans/roadmap.md)                                                                                                                                                                                                                                                                                                                                                                         |
 
 ---
 
@@ -21,10 +21,10 @@ HomeCore is a lightweight, always-on home infrastructure service for a household
 
 The binary runs in one of three **modes**: `controller`, `agent` or `both`.
 
-| Role       | Responsibilities                                                                                   |
-|------------|----------------------------------------------------------------------------------------------------|
+| Role       | Responsibilities                                                                                                                                                   |
+|------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Controller | Device registry, TCP online monitoring, Wake-on-LAN, signed shutdown dispatch, Cloudflare DDNS, JWT-protected REST API, Swagger UI, static web UI, system metrics. |
-| Agent      | Small HTTP listener on a managed machine that verifies signed commands from trusted Controllers and executes a fixed allowlist of power actions. |
+| Agent      | Small HTTP listener on a managed machine that verifies signed commands from trusted Controllers and executes a fixed allowlist of power actions.                   |
 
 ### 1.1 MVP (in scope)
 
@@ -44,24 +44,24 @@ The brief is sound. The main shape (Go modular monolith, SQLite, HTTP/JSON, sign
 platform adapters) is kept. The review below lists **gaps and risks** found while turning it into a
 buildable design, and how this document resolves them.
 
-| # | Finding | Resolution |
-|---|---------|------------|
-| 1 | `shutdown_secret` as a device field implies a shared secret stored on both sides. | Ed25519: Controller signs, Agent stores only Controller **public** keys. The device stores `agent_id` + agent endpoint, no secret. (ADR-001) |
-| 2 | Device `status` mixes *observed* state (online/offline) with *intended* transitions (`waking`). | Two fields: `status` = observed (`unknown/online/offline`); `power_transition` = derived from the active command (`none/waking/shutting_down`). |
-| 3 | IP is not a stable identity under DHCP. | Identity = UUID. `ip_address` / `hostname` are mutable *addresses*; `agent_id` identifies a running agent. (ADR-002) |
-| 4 | `command accepted` ≠ `machine off/on`. | Explicit command state machine with monitor-based verification and deadlines. (ADR-003, §8.2) |
-| 5 | SQLite on Android via gomobile is the largest technical risk. | Pure-Go `modernc.org/sqlite`, one driver everywhere. Cross-compile verified for `android/arm64`, `linux/{arm,arm64,amd64}`, `windows/amd64`, `darwin/arm64` with `CGO_ENABLED=0`. **On-device spike still required**, especially 32-bit `armeabi-v7a` TV boxes. (ADR-004) |
-| 6 | Two Controllers on one LAN may both act on an Agent. | Agent trusts a list of Controller keys; idempotency by `command_id`; per-action cooldown. Monitoring by several controllers is harmless (read-only). (ADR-005) |
-| 7 | **Clock skew**: signed commands carry a timestamp (±30 s). Cheap Android TV boxes often have no RTC and boot with a wrong clock until NTP syncs. | Agent returns a distinguishable `clock_skew` error code; Controller surfaces it in the command result. Controller exposes its time in `/healthz`. |
-| 8 | **Replay after agent restart**: an in-memory nonce cache is lost on restart, so a captured request could be replayed within the skew window. | Agent additionally rejects any command whose `issued_at` is older than the agent process start time. No persistent nonce store required. |
-| 9 | JWT over plain HTTP on a LAN can be sniffed. | Optional TLS on the Controller listener; recommend reverse proxy / VPN for remote access. Short access-token TTL (15 min) + rotating refresh tokens. |
-| 10 | WOL from Android: `255.255.255.255` may leave via the wrong interface. | Default to the **directed subnet broadcast** computed from the device IP + local interface mask; per-device `wol_broadcast_address` override; optional port 9 / 7. |
-| 11 | Android may kill background work (Doze, app standby). Phones are poor 24/7 hosts. | Kotlin host runs a foreground service; Go side must tolerate being stopped/restarted at any time (all state persisted, idempotent startup). TV Box is the primary Android target. |
-| 12 | Agent needs root-level power to shut down, but the HTTP server must not run as root. | Linux: dedicated `homecore` user + polkit rule allowing only `org.freedesktop.login1.power-off`/`reboot`. Agent calls `systemctl poweroff`. |
-| 13 | Shutdown request may be cut off when the machine powers down. | Agent replies `202 Accepted` first, executes after a configurable delay (default 3 s). |
-| 14 | Public IP lookup from a single provider can lie or fail. | Query ≥ 2 providers; require agreement (quorum); keep last known IP on disagreement and record an error. |
-| 15 | Spec drift between OpenAPI and handlers. | **Spec-first**: `api/openapi.yaml` → `oapi-codegen` (chi server + models + embedded spec). Generated code is committed. |
-| 16 | Storing every probe result would grow the DB unboundedly. | `device_status_history` stores **transitions only**; retention job prunes history/commands older than N days. |
+| #  | Finding                                                                                                                                          | Resolution                                                                                                                                                                                                                                                                |
+|----|--------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1  | `shutdown_secret` as a device field implies a shared secret stored on both sides.                                                                | Ed25519: Controller signs, Agent stores only Controller **public** keys. The device stores `agent_id` + agent endpoint, no secret. (ADR-001)                                                                                                                              |
+| 2  | Device `status` mixes *observed* state (online/offline) with *intended* transitions (`waking`).                                                  | Two fields: `status` = observed (`unknown/online/offline`); `power_transition` = derived from the active command (`none/waking/shutting_down`).                                                                                                                           |
+| 3  | IP is not a stable identity under DHCP.                                                                                                          | Identity = UUID. `ip_address` / `hostname` are mutable *addresses*; `agent_id` identifies a running agent. (ADR-002)                                                                                                                                                      |
+| 4  | `command accepted` ≠ `machine off/on`.                                                                                                           | Explicit command state machine with monitor-based verification and deadlines. (ADR-003, §8.2)                                                                                                                                                                             |
+| 5  | SQLite on Android via gomobile is the largest technical risk.                                                                                    | Pure-Go `modernc.org/sqlite`, one driver everywhere. Cross-compile verified for `android/arm64`, `linux/{arm,arm64,amd64}`, `windows/amd64`, `darwin/arm64` with `CGO_ENABLED=0`. **On-device spike still required**, especially 32-bit `armeabi-v7a` TV boxes. (ADR-004) |
+| 6  | Two Controllers on one LAN may both act on an Agent.                                                                                             | Agent trusts a list of Controller keys; idempotency by `command_id`; per-action cooldown. Monitoring by several controllers is harmless (read-only). (ADR-005)                                                                                                            |
+| 7  | **Clock skew**: signed commands carry a timestamp (±30 s). Cheap Android TV boxes often have no RTC and boot with a wrong clock until NTP syncs. | Agent returns a distinguishable `clock_skew` error code; Controller surfaces it in the command result. Controller exposes its time in `/healthz`.                                                                                                                         |
+| 8  | **Replay after agent restart**: an in-memory nonce cache is lost on restart, so a captured request could be replayed within the skew window.     | Agent additionally rejects any command whose `issued_at` is older than the agent process start time. No persistent nonce store required.                                                                                                                                  |
+| 9  | JWT over plain HTTP on a LAN can be sniffed.                                                                                                     | Optional TLS on the Controller listener; recommend reverse proxy / VPN for remote access. Short access-token TTL (15 min) + rotating refresh tokens.                                                                                                                      |
+| 10 | WOL from Android: `255.255.255.255` may leave via the wrong interface.                                                                           | Default to the **directed subnet broadcast** computed from the device IP + local interface mask; per-device `wol_broadcast_address` override; optional port 9 / 7.                                                                                                        |
+| 11 | Android may kill background work (Doze, app standby). Phones are poor 24/7 hosts.                                                                | Kotlin host runs a foreground service; Go side must tolerate being stopped/restarted at any time (all state persisted, idempotent startup). TV Box is the primary Android target.                                                                                         |
+| 12 | Agent needs root-level power to shut down, but the HTTP server must not run as root.                                                             | Linux: dedicated `homecore` user + polkit rule allowing only `org.freedesktop.login1.power-off`/`reboot`. Agent calls `systemctl poweroff`.                                                                                                                               |
+| 13 | Shutdown request may be cut off when the machine powers down.                                                                                    | Agent replies `202 Accepted` first, executes after a configurable delay (default 3 s).                                                                                                                                                                                    |
+| 14 | Public IP lookup from a single provider can lie or fail.                                                                                         | Query ≥ 2 providers; require agreement (quorum); keep last known IP on disagreement and record an error.                                                                                                                                                                  |
+| 15 | Spec drift between OpenAPI and handlers.                                                                                                         | **Spec-first**: `api/openapi.yaml` → `oapi-codegen` (chi server + models + embedded spec). Generated code is committed.                                                                                                                                                   |
+| 16 | Storing every probe result would grow the DB unboundedly.                                                                                        | `device_status_history` stores **transitions only**; retention job prunes history/commands older than N days.                                                                                                                                                             |
 
 ---
 
@@ -542,26 +542,26 @@ secret material belongs to the Controller, not the device.
 
 Namespace `/api/v1`; full contract in `api/openapi.yaml`. Summary (brief §4, plus additions marked ✚):
 
-| Method | Path | Auth |
-|--------|------|------|
-| POST | `/api/v1/auth/login` · `/auth/refresh` · ✚`/auth/logout` | public / public / user |
-| GET | ✚`/api/v1/auth/me` | user |
-| GET/POST | `/api/v1/devices` | user |
-| GET/PATCH/DELETE | `/api/v1/devices/{id}` | user |
-| ✚DELETE | `/api/v1/devices/{id}/agent` | user |
-| POST | `/api/v1/devices/{id}/wake` · `/shutdown` | user; idempotent, 1 request per device per second (`429`) |
-| POST | `/api/v1/devices/{id}/probe` | user |
-| GET | `/api/v1/devices/{id}/history` | user |
-| GET | `/api/v1/commands` · ✚`/commands/{id}` | user |
-| GET | `/api/v1/system/metrics` · ✚`/system/info` · ✚`/system/controller-key` | user |
-| GET | ✚`/api/v1/activity` | user; cursor-paged feed over `audit_log` |
-| GET/POST | `/api/v1/ddns` | user |
-| ✚PATCH/DELETE | `/api/v1/ddns/{id}` | user |
-| POST | `/api/v1/ddns/{id}/sync` | user |
-| ✚GET/POST | `/api/v1/port-forwards` · ✚GET/PATCH/DELETE `/port-forwards/{id}` | user (session only; scoped keys get `403`); `enabled` is the on/off switch |
-| ✚GET/POST | `/api/v1/alerts/channels` · ✚GET/PATCH/DELETE `/alerts/channels/{id}` · ✚POST `/alerts/channels/{id}/test` | user (session only; scoped keys get `403`) |
-| ✚POST | `/api/v1/ddns/cloudflare/zones` · `/ddns/cloudflare/zones/{zone_id}/records` | user; read-only lookups for the form dropdowns (`POST` so the token stays out of URLs) |
-| GET | `/healthz`, `/readyz`, `/api/openapi.json`, `/api/docs` | public |
+| Method           | Path                                                                                                       | Auth                                                                                   |
+|------------------|------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
+| POST             | `/api/v1/auth/login` · `/auth/refresh` · ✚`/auth/logout`                                                   | public / public / user                                                                 |
+| GET              | ✚`/api/v1/auth/me`                                                                                         | user                                                                                   |
+| GET/POST         | `/api/v1/devices`                                                                                          | user                                                                                   |
+| GET/PATCH/DELETE | `/api/v1/devices/{id}`                                                                                     | user                                                                                   |
+| ✚DELETE          | `/api/v1/devices/{id}/agent`                                                                               | user                                                                                   |
+| POST             | `/api/v1/devices/{id}/wake` · `/shutdown`                                                                  | user; idempotent, 1 request per device per second (`429`)                              |
+| POST             | `/api/v1/devices/{id}/probe`                                                                               | user                                                                                   |
+| GET              | `/api/v1/devices/{id}/history`                                                                             | user                                                                                   |
+| GET              | `/api/v1/commands` · ✚`/commands/{id}`                                                                     | user                                                                                   |
+| GET              | `/api/v1/system/metrics` · ✚`/system/info` · ✚`/system/controller-key`                                     | user                                                                                   |
+| GET              | ✚`/api/v1/activity`                                                                                        | user; cursor-paged feed over `audit_log`                                               |
+| GET/POST         | `/api/v1/ddns`                                                                                             | user                                                                                   |
+| ✚PATCH/DELETE    | `/api/v1/ddns/{id}`                                                                                        | user                                                                                   |
+| POST             | `/api/v1/ddns/{id}/sync`                                                                                   | user                                                                                   |
+| ✚GET/POST        | `/api/v1/port-forwards` · ✚GET/PATCH/DELETE `/port-forwards/{id}`                                          | user (session only; scoped keys get `403`); `enabled` is the on/off switch             |
+| ✚GET/POST        | `/api/v1/alerts/channels` · ✚GET/PATCH/DELETE `/alerts/channels/{id}` · ✚POST `/alerts/channels/{id}/test` | user (session only; scoped keys get `403`)                                             |
+| ✚POST            | `/api/v1/ddns/cloudflare/zones` · `/ddns/cloudflare/zones/{zone_id}/records`                               | user; read-only lookups for the form dropdowns (`POST` so the token stays out of URLs) |
+| GET              | `/healthz`, `/readyz`, `/api/openapi.json`, `/api/docs`                                                    | public                                                                                 |
 
 Pagination: `?limit=&cursor=` (`limit` 1..200, default 50; an explicit `0` or a larger value is
 `400`), no total count; `next_cursor` is present only when more items exist. Order is fixed:
@@ -580,13 +580,13 @@ stays correct when rows are inserted or deleted between pages (no offset drift).
 
 ## 10. Security model
 
-| Zone | AuthN | AuthZ |
-|------|-------|-------|
-| REST API | JWT (HS256, 15 min) + rotating refresh token (30 d) | none: every authenticated user is equal (ADR-011) |
+| Zone                                           | AuthN                                                                       | AuthZ                                                                |
+|------------------------------------------------|-----------------------------------------------------------------------------|----------------------------------------------------------------------|
+| REST API                                       | JWT (HS256, 15 min) + rotating refresh token (30 d)                         | none: every authenticated user is equal (ADR-011)                    |
 | Legacy `GET /api/turn-on\|turn-off\|is-online` | the same JWT, or a long-lived `scp: legacy` token (`homecore token create`) | a legacy token is valid only on operations tagged `legacy` (ADR-017) |
-| Agent listener | Ed25519 signature by a trusted Controller key | action allowlist |
-| Swagger UI | none (static); API calls still require JWT | grants nothing |
-| Cloudflare | scoped API token | DNS edit on one zone |
+| Agent listener                                 | Ed25519 signature by a trusted Controller key                               | action allowlist                                                     |
+| Swagger UI                                     | none (static); API calls still require JWT                                  | grants nothing                                                       |
+| Cloudflare                                     | scoped API token                                                            | DNS edit on one zone                                                 |
 
 Principles:
 1. Agent never executes arbitrary commands; actions are an enum.
@@ -641,13 +641,13 @@ deleting an account takes effect immediately; the cost is one indexed SQLite rea
 `POST /auth/refresh` runs in one `BEGIN IMMEDIATE` transaction, so concurrent requests with the
 same token are serialised:
 
-| State of the presented token | Result |
-|------------------------------|--------|
-| unknown, expired, revoked | `401` |
-| user disabled or deleted | `401`, family revoked |
-| unused | mark used, issue new access + refresh token in the same family (`expires_at = now + refresh_token_ttl`, sliding), keep a sealed copy of the pair on the used row |
-| used, `now - used_at < 10 s` and the sealed copy exists | **grace window:** return the same pair (access token not re-minted, `expires_in` = remaining) |
-| used, window passed | **reuse:** revoke the whole family, `401`, audit `auth.refresh_reuse` |
+| State of the presented token                            | Result                                                                                                                                                           |
+|---------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| unknown, expired, revoked                               | `401`                                                                                                                                                            |
+| user disabled or deleted                                | `401`, family revoked                                                                                                                                            |
+| unused                                                  | mark used, issue new access + refresh token in the same family (`expires_at = now + refresh_token_ttl`, sliding), keep a sealed copy of the pair on the used row |
+| used, `now - used_at < 10 s` and the sealed copy exists | **grace window:** return the same pair (access token not re-minted, `expires_in` = remaining)                                                                    |
+| used, window passed                                     | **reuse:** revoke the whole family, `401`, audit `auth.refresh_reuse`                                                                                            |
 
 The grace window exists because browser tabs on plain HTTP cannot serialise refreshes (no Web Locks
 outside secure contexts, GAP-INF-01): two tabs sending the same token within a moment would
@@ -757,12 +757,12 @@ on loopback. These Android integration paths have not yet been device-validated.
 
 ## 12. Platform adapters
 
-| Capability | Linux | macOS (dev) | Windows | Android |
-|------------|-------|-------------|-----------------|---------|
-| Power control (agent) | `systemctl poweroff/reboot` via polkit | dry-run (log only) | `InitiateSystemShutdownExW` after enabling `SeShutdownPrivilege`; Agent runs elevated (REQ-AG-015) | n/a (controller only) |
-| System metrics | gopsutil | gopsutil | gopsutil | Kotlin callback |
-| Service manager | systemd unit | `go run` / launchd | Windows Service (later) | Foreground service |
-| Master key | file / env | file / env | DPAPI (later) | Android Keystore via host |
+| Capability            | Linux                                  | macOS (dev)        | Windows                                                                                            | Android                   |
+|-----------------------|----------------------------------------|--------------------|----------------------------------------------------------------------------------------------------|---------------------------|
+| Power control (agent) | `systemctl poweroff/reboot` via polkit | dry-run (log only) | `InitiateSystemShutdownExW` after enabling `SeShutdownPrivilege`; Agent runs elevated (REQ-AG-015) | n/a (controller only)     |
+| System metrics        | gopsutil                               | gopsutil           | gopsutil                                                                                           | Kotlin callback           |
+| Service manager       | systemd unit                           | `go run` / launchd | Windows Service (later)                                                                            | Foreground service        |
+| Master key            | file / env                             | file / env         | DPAPI (later)                                                                                      | Android Keystore via host |
 
 Build tags: note that `GOOS=android` also satisfies the `linux` constraint, so Linux-only adapters
 use `//go:build linux && !android`.
