@@ -16,6 +16,8 @@
 - Docs: `requirements/port-forwarding.md`, ADR-022, architecture §6.13, `database.md`, `http-api.md`, `web-ui.md`, `overview.md`, roadmap.
 
 ## Changed
+- Port Forwarding add/edit form moved from an inline block under the list into a modal dialog (owner feedback: with many rules the inline form drifted down the page). Verified: `pnpm run lint`, `pnpm test` (15 files / 239 tests), `pnpm run build`; not looked at in a browser.
+- `CustomSelect` got an opt-in `compactTrigger` prop; the Connection type dropdown uses it so the closed field shows only the name (TCP / UDP / Universal) and is as tall as the other inputs, while the open list still shows each description. Other screens (Activity, DDNS) are unchanged. `pnpm run lint`, `pnpm test` (239) pass.
 - `apiError` (`handlers_devices.go`) maps the new errors (400/404/409); `runController` builds the service and adds one `errgroup` member. Both are additive.
 - API test environment (`devEnv`) also runs a real `portforward.Service` for the length of each test.
 
