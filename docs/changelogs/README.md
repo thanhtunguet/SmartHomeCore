@@ -5,6 +5,7 @@ that spans days uses its end date). Newest entries are listed first below.
 
 | Date | Entry | Summary |
 |------|-------|---------|
+| 2026-11-18 | [2026-11-18-sidebar-tunnel-rename.md](2026-11-18-sidebar-tunnel-rename.md) | Sidebar footer: hostname truncates, API status row removed; "Port Forwarding" renamed "Tunnel" in the UI |
 | 2026-11-18 | [2026-11-18-port-forwarding.md](2026-11-18-port-forwarding.md) | Port forwarding (ADR-022): TCP/UDP/Universal relay rules with a local interface, a name and a stored on/off switch that is restored after a restart, `/port-forwards` API, Port Forwarding tab in the UI, migration `0009` |
 | 2026-11-15 | [2026-11-15-alerts-ui.md](2026-11-15-alerts-ui.md) | Settings card for alert channels (list, add/edit Telegram, events, pause, test, delete), API types regenerated, six alert endpoints in the contract test; real Telegram run skipped by the owner |
 | 2026-11-15 | [2026-11-15-alerts.md](2026-11-15-alerts.md) | Alerts (ADR-021): channels with a Telegram adapter (bot token + target user id, sealed), events for a new public IP, wake/shutdown requests and a status change outside HomeCore's control, queue with retries, test endpoint, migration `0008` |
