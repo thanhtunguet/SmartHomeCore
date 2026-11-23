@@ -17,6 +17,7 @@
 
 - `/api/docs`, `/api/openapi.json`, and `/api/swagger.json` now depend on the persisted database setting. The legacy `controller.api_docs` YAML key remains accepted for existing configs but is ignored.
 - Settings now includes an OpenAPI switch and links when enabled.
+- Anchored the OpenAPI switch thumb to the track and prevented the control from shrinking, keeping it inside the card when enabled.
 
 ## Verification
 
