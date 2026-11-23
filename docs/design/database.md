@@ -3,10 +3,10 @@
 | | |
 |---|---|
 | Engine | SQLite 3 (embedded) via `modernc.org/sqlite` (pure Go, [ADR-004](decisions.md#adr-004--sqlite-driver-moderncorgsqlite-everywhere)) |
-| Schema version | `9` (`internal/storage/migrations/0001_init.sql`, `0002_device_meta.sql`, `0003_users_no_roles.sql`, `0004_refresh_grace.sql`, `0005_agent_status.sql`, `0006_ddns_state.sql`, `0007_service_account_keys.sql`, `0008_alert_channels.sql`, `0009_port_forward_rules.sql`) |
+| Schema version | `10` (`internal/storage/migrations/0001_init.sql` … `0010_openapi_setting.sql`) |
 | Owner role | Controller only. The Agent has no database |
 | Requirements | [storage-and-secrets.md](../requirements/storage-and-secrets.md) |
-| Last reviewed | 2026-11-18 (port forwarding: migration 0009); 2026-11-15 (alerts: migration 0008; earlier: 2026-11-14 service account keys: migration 0007; Phase 4: migration 0006, DDNS observed state and record uniqueness; earlier: Phase 3 migration 0005) |
+| Last reviewed | 2026-11-23 (OpenAPI setting: migration 0010); 2026-11-18 (port forwarding: migration 0009); 2026-11-15 (alerts: migration 0008; earlier: 2026-11-14 service account keys: migration 0007; Phase 4: migration 0006, DDNS observed state and record uniqueness; earlier: Phase 3 migration 0005) |
 
 The DDL in `internal/storage/migrations/` is authoritative. This document explains it and must be
 updated in the same change as any new migration.
@@ -343,6 +343,9 @@ One row per sync attempt that reached a verdict (`updated`, `unchanged`, `failed
 Index: `ddns_sync_history_config (config_id, at DESC)`.
 
 ### system_settings
+
+The `openapi_enabled` key stores a single byte (`0` or `1`) and defaults to `0` in migration 0010.
+The Controller fails closed when the row is absent or cannot be read.
 
 Key/value store for Controller-wide settings.
 

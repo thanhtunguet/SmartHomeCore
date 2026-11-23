@@ -35,6 +35,7 @@ import (
 	"github.com/thanhtunguet/homecore/internal/portforward"
 	"github.com/thanhtunguet/homecore/internal/servicekey"
 	"github.com/thanhtunguet/homecore/internal/storage"
+	"github.com/thanhtunguet/homecore/internal/systemsettings"
 	"github.com/thanhtunguet/homecore/web"
 )
 
@@ -54,6 +55,7 @@ type Deps struct {
 	ShutdownTimeout time.Duration
 	Log             *slog.Logger
 	DB              *storage.DB
+	SystemSettings  *systemsettings.Service
 	Authn           auth.Authenticator  // defaults to Auth (plus ServiceKeys when set), then to auth.RejectAll
 	Auth            *auth.Service       // login/refresh/logout/me; nil answers 501
 	ServiceKeys     *servicekey.Service // service account keys (ADR-018); nil answers 501 and EdDSA keys are not accepted
@@ -155,14 +157,38 @@ func newRouter(d Deps) (http.Handler, error) {
 		})
 	})
 
-	if cfg.APIDocs {
-		r.Get("/api/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
+	docsLimiter := middleware.NewRateLimiterWithRetry(120, 2, 1) // two requests per second per client IP
+	serveDocs := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if d.SystemSettings == nil {
+			httpx.WriteError(w, http.StatusNotFound, "not_found", "OpenAPI documentation is disabled")
+			return
+		}
+		enabled, err := d.SystemSettings.OpenAPIEnabled(r.Context())
+		if err != nil {
+			httpx.WriteError(w, http.StatusServiceUnavailable, "unavailable", "OpenAPI setting is unavailable")
+			return
+		}
+		if !enabled {
+			httpx.WriteError(w, http.StatusNotFound, "not_found", "OpenAPI documentation is disabled")
+			return
+		}
+		if r.URL.Path == "/api/openapi.json" || r.URL.Path == "/api/swagger.json" {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write(specJSON)
-		})
-		r.Get("/api/docs", http.RedirectHandler("/api/docs/", http.StatusMovedPermanently).ServeHTTP)
-		r.Handle("/api/docs/*", http.StripPrefix("/api/docs/", http.FileServerFS(web.Swagger())))
-	}
+			return
+		}
+		if r.URL.Path == "/api/docs" {
+			http.Redirect(w, r, "/api/docs/", http.StatusMovedPermanently)
+			return
+		}
+		http.StripPrefix("/api/docs/", http.FileServerFS(web.Swagger())).ServeHTTP(w, r)
+	})
+	limitedDocs := docsLimiter.Middleware(serveDocs)
+	r.Method(http.MethodGet, "/api/docs", serveDocs) // the redirect target is rate-limited below
+	r.Method(http.MethodGet, "/api/docs/", limitedDocs)
+	r.Method(http.MethodGet, "/api/docs/*", serveDocs) // static assets share the setting gate, not the request budget
+	r.Method(http.MethodGet, "/api/openapi.json", limitedDocs)
+	r.Method(http.MethodGet, "/api/swagger.json", limitedDocs)
 
 	h := handlers.New(d.DB, d.Log)
 	h.Auth = d.Auth
@@ -172,6 +198,7 @@ func newRouter(d Deps) (http.Handler, error) {
 	h.DDNS, h.Metrics = d.DDNS, d.Metrics
 	h.Alerts = d.Alerts
 	h.PortForward = d.PortForward
+	h.SystemSettings = d.SystemSettings
 	throttle := middleware.NewDeviceThrottle(DeviceCommandInterval)
 	h.Throttle = throttle
 	h.Info = handlers.InfoSource{Mode: string(d.Mode), Controller: d.Config}

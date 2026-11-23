@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | Brief §7 (phases), §8 (MVP); [architecture](../design/architecture.md) |
-| Last updated | 2026-11-18 (port forwarding; earlier: 2026-11-15 alerts UI; earlier: alerts backend; MCP server; earlier: 2026-11-14 service account keys; legacy endpoints; build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
+| Last updated | 2026-11-23 (database-controlled OpenAPI docs); 2026-11-18 (port forwarding; earlier: 2026-11-15 alerts UI; earlier: alerts backend; MCP server; earlier: 2026-11-14 service account keys; legacy endpoints; build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
 
 Legend: `[x]` done and verified · `[~]` partially done · `[ ]` not started.
 Tick items in the same change that completes them, and add a changelog entry.
@@ -47,6 +47,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [x] HTTP server with chi and the middleware chain (REQ-API-009..014)
 - [x] Spec-first OpenAPI + codegen, spec-derived authorization policy (REQ-API-006/008)
 - [x] Offline Swagger UI at `/api/docs`, spec at `/api/openapi.json` (REQ-API-002/003)
+- [x] OpenAPI docs default off, persisted Settings switch, 2 requests/second per-IP limit (REQ-API-034, REQ-UI-032)
 - [x] Health and readiness endpoints (REQ-API-004)
 - [x] SQLite + versioned migrations + full initial schema (REQ-ST-*)
 - [x] Master key + AES-GCM sealing (REQ-SEC-001/002)

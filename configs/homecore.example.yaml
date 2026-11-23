@@ -15,7 +15,6 @@ controller:
   tls:                      # optional; strongly recommended if the API is reachable beyond the LAN
     cert_file: ""
     key_file: ""
-  api_docs: true            # serve /api/openapi.json and /api/docs (Swagger UI, offline)
   trusted_proxies: []       # CIDRs of reverse proxies whose X-Forwarded-For is trusted, e.g. ["127.0.0.1/32"]
   cors_allowed_origins: []  # exact origins; empty = same-origin only
   auth:                     # accounts are created with `homecore user add <username>` (no default account)

@@ -5,7 +5,7 @@
 | Brief | §1 (roles, one build), §2, §5 ("One binary, several roles") |
 | Code | `cmd/homecore` (`main.go`, `user.go`), `internal/app`, `internal/config`, `internal/logging`, `internal/httpx`, `internal/version`, `mobile` |
 | Design | [architecture §4](../design/architecture.md#4-runtime-model) |
-| Last updated | 2026-11-15 (agent.id, `--agent-id`/`--trusted-controller`/`--agent-listen`; earlier: 2026-11-14 Phase 4: REQ-RT-013 DDNS keys; earlier: Phase 3 REQ-RT-012 `homecore key show`, Phase 2 REQ-RT-004 command-deadline and retention checks) |
+| Last updated | 2026-11-23 (deprecated `controller.api_docs` setting); 2026-11-15 (agent.id, `--agent-id`/`--trusted-controller`/`--agent-listen`; earlier: 2026-11-14 Phase 4: REQ-RT-013 DDNS keys; earlier: Phase 3 REQ-RT-012 `homecore key show`, Phase 2 REQ-RT-004 command-deadline and retention checks) |
 | Status | **Implemented** |
 
 ## Functional requirements
@@ -25,6 +25,8 @@
 | REQ-RT-011 | `homecore user add\|passwd\|list` subcommands share the server's configuration loading (`--config`, `--data-dir`, `HOMECORE_*`) and operate on the same `<data_dir>/homecore.db`; see [REQ-AUTH-015..018](authentication.md). The key `controller.auth.bootstrap_admin_user` no longer exists (removed 2026-11-14; a config that sets it fails strict validation). `controller.auth` keeps `access_token_ttl`, `refresh_token_ttl`, `login_rate_per_minute`, `api_rate_per_minute`. | Implemented | `TestUserDataDirFromEnvironment`, `TestLoadBytesRejectsUnknownFieldsAndBadValues/removed_bootstrap_key`, `TestShippedConfigFilesAreValid` |
 | REQ-RT-012 | `homecore key show` shares the server's configuration loading (`--config`, `--data-dir`, `HOMECORE_*`), creates the Controller key if it does not exist yet (and audits `controller_key.create` with actor `cli`), and prints `key_id`, `algorithm`, the base64 public key and an Agent `trusted_controllers` snippet. It never prints the private key; see [REQ-SHD-002](shutdown-agent.md). | Implemented | `TestKeyShowCreatesThenReprintsTheSameKey`, `TestKeyUsageErrors` |
 | REQ-RT-013 | `controller.ddns` keys: `ip_providers` (default: `https://api64.ipify.org`, `https://icanhazip.com`, `https://ifconfig.me/ip`, `https://checkip.amazonaws.com`; a YAML list **replaces** the defaults), `cloudflare_api_url` (default `https://api.cloudflare.com/client/v4`) and `allow_insecure_http` (default `false`). Validated only when the process runs a Controller: at least 2 providers on different hosts, absolute `https` URLs without user-info (`http` only with `allow_insecure_http`); the Cloudflare URL must be `https`, without query or fragment (same switch). Provider URLs may carry keys and are never logged or returned (only the host is). The `ip_providers` learn the Controller's public IP; see [ddns.md](ddns.md). | Implemented | `TestDDNSConfig`, `TestLoadBytesRejectsUnknownFieldsAndBadValues` (`one_ddns_provider`, `http_ddns_provider`, `same-host_providers`, `provider_credentials`, `http_cloudflare_url`, `cloudflare_url_query`), `TestShippedConfigFilesAreValid` |
+
+| REQ-RT-014 | The legacy `controller.api_docs` YAML key remains accepted for existing configs but is ignored; availability is controlled only by the persisted OpenAPI setting (REQ-API-034). | Implemented (untested) | Config decoding and DB-controlled route coverage pending |
 
 ## Non-functional requirements
 

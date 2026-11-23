@@ -5,7 +5,7 @@
 | Brief | §3.7, §6 (protection of keys and tokens) |
 | Code | `internal/storage`, `internal/storage/migrations`, `internal/secrets` |
 | Design | [database.md](../design/database.md), [architecture §6.8–6.9](../design/architecture.md), [ADR-004](../design/decisions.md#adr-004--sqlite-driver-moderncorgsqlite-everywhere) |
-| Last updated | 2026-11-15 (alert channel secret, REQ-SEC-007; earlier: 2026-11-14 service account keys) |
+| Last updated | 2026-11-23 (OpenAPI setting migration 0010); 2026-11-15 (alert channel secret, REQ-SEC-007; earlier: 2026-11-14 service account keys) |
 | Status | **Implemented** (storage layer + schema); Controller key sealed since Phase 3; DDNS tokens sealed since Phase 4 |
 
 ## Storage
@@ -19,6 +19,7 @@
 | REQ-ST-005 | The schema enforces integrity in the DB itself: at most one active (`pending`/`sent`/`acknowledged`) command per device and type; at most one active Controller signing key; enum `CHECK`s; port/interval ranges; FK cascades. | Implemented | `TestActiveCommandUniqueness` |
 | REQ-ST-006 | `DB.Backup(ctx, dst)` writes a consistent online snapshot with `VACUUM INTO` and refuses to overwrite an existing file. | Implemented (untested); no API yet | — |
 | REQ-ST-007 | Conventions: STRICT tables; IDs TEXT UUIDv7; timestamps INTEGER unix milliseconds UTC (`storage.Millis` / `FromMillis`); booleans INTEGER 0/1. | Implemented | Schema review |
+| REQ-ST-008 | Migration `0010` seeds `system_settings.openapi_enabled` to false; updates persist the single-byte boolean and timestamp in the existing key/value table. | Implemented (untested) | Migration and repository coverage pending |
 
 ## Secrets at rest
 

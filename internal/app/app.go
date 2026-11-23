@@ -29,6 +29,7 @@ import (
 	"github.com/thanhtunguet/homecore/internal/servicekey"
 	"github.com/thanhtunguet/homecore/internal/storage"
 	"github.com/thanhtunguet/homecore/internal/system"
+	"github.com/thanhtunguet/homecore/internal/systemsettings"
 	"github.com/thanhtunguet/homecore/internal/version"
 )
 
@@ -195,6 +196,7 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 		ShutdownTimeout: cfg.ShutdownTimeout,
 		Log:             log,
 		DB:              db,
+		SystemSettings:  systemsettings.New(systemsettings.NewSQLiteRepository(db)),
 		Auth:            authSvc,
 		ServiceKeys:     keySvc,
 		Devices:         devSvc,

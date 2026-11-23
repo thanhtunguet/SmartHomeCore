@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -116,11 +117,12 @@ func ClientIP(r *http.Request) string {
 
 // RateLimiter is a per-client-IP token bucket. Idle buckets are swept periodically.
 type RateLimiter struct {
-	mu        sync.Mutex
-	perMinute int
-	burst     int
-	clients   map[string]*client
-	lastSweep time.Time
+	mu         sync.Mutex
+	perMinute  int
+	burst      int
+	retryAfter int
+	clients    map[string]*client
+	lastSweep  time.Time
 }
 
 type client struct {
@@ -130,7 +132,12 @@ type client struct {
 
 // NewRateLimiter allows perMinute requests per IP with the given burst.
 func NewRateLimiter(perMinute, burst int) *RateLimiter {
-	return &RateLimiter{perMinute: perMinute, burst: burst, clients: map[string]*client{}, lastSweep: time.Now()}
+	return NewRateLimiterWithRetry(perMinute, burst, 60)
+}
+
+// NewRateLimiterWithRetry creates a per-client-IP limiter with an explicit Retry-After value.
+func NewRateLimiterWithRetry(perMinute, burst, retryAfterSeconds int) *RateLimiter {
+	return &RateLimiter{perMinute: perMinute, burst: burst, retryAfter: retryAfterSeconds, clients: map[string]*client{}, lastSweep: time.Now()}
 }
 
 func (rl *RateLimiter) allow(ip string) bool {
@@ -161,7 +168,7 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !rl.allow(ClientIP(r)) {
-			w.Header().Set("Retry-After", "60")
+			w.Header().Set("Retry-After", strconv.Itoa(rl.retryAfter))
 			httpx.WriteError(w, http.StatusTooManyRequests, "rate_limited", "too many requests")
 			return
 		}

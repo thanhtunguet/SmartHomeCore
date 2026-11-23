@@ -11,10 +11,12 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/thanhtunguet/homecore/internal/auth"
 	"github.com/thanhtunguet/homecore/internal/config"
 	"github.com/thanhtunguet/homecore/internal/storage"
+	"github.com/thanhtunguet/homecore/internal/systemsettings"
 )
 
 // tokenAuth maps fixed tokens to principals.
@@ -38,10 +40,15 @@ func newTestHandler(t *testing.T) http.Handler {
 	if _, err := db.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
+	settings := systemsettings.New(systemsettings.NewSQLiteRepository(db))
+	if err := settings.SetOpenAPIEnabled(ctx, true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	srv, err := New(Deps{
-		Config: config.Default().Controller,
-		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-		DB:     db,
+		Config:         config.Default().Controller,
+		Log:            slog.New(slog.NewTextHandler(io.Discard, nil)),
+		DB:             db,
+		SystemSettings: settings,
 		Authn: tokenAuth{
 			"token-a": {UserID: "u1", Username: "alice"},
 			"token-b": {UserID: "u2", Username: "bob"},

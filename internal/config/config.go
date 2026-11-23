@@ -63,8 +63,8 @@ func (t TLS) Enabled() bool { return t.CertFile != "" && t.KeyFile != "" }
 // Controller configures the Controller role.
 type Controller struct {
 	Listen             string   `yaml:"listen"`
+	APIDocs            bool     `yaml:"api_docs"` // Deprecated; availability is controlled by the persisted OpenAPI setting.
 	TLS                TLS      `yaml:"tls"`
-	APIDocs            bool     `yaml:"api_docs"`
 	TrustedProxies     []string `yaml:"trusted_proxies"` // CIDRs whose X-Forwarded-For is trusted
 	CORSAllowedOrigins []string `yaml:"cors_allowed_origins"`
 	Auth               Auth     `yaml:"auth"`
@@ -151,8 +151,7 @@ func Default() Config {
 		ShutdownTimeout: 10 * time.Second,
 		Log:             LogConfig{Level: "info", Format: "text"},
 		Controller: Controller{
-			Listen:  ":8080",
-			APIDocs: true,
+			Listen: ":8080",
 			Auth: Auth{
 				AccessTokenTTL:     15 * time.Minute,
 				RefreshTokenTTL:    30 * 24 * time.Hour,
