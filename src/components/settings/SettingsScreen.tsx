@@ -235,9 +235,9 @@ export const SettingsScreen: React.FC = () => {
             aria-label="Enable OpenAPI and Swagger UI"
             disabled={!openAPI || openAPILoading}
             onClick={() => void handleOpenAPIToggle()}
-            className={`relative h-6 w-11 rounded-full transition-colors disabled:opacity-50 ${openAPI?.enabled ? 'bg-emerald-600' : 'bg-neutral-300 dark:bg-neutral-700'}`}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center overflow-hidden rounded-full p-0 transition-colors disabled:opacity-50 ${openAPI?.enabled ? 'bg-emerald-600' : 'bg-neutral-300 dark:bg-neutral-700'}`}
           >
-            <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${openAPI?.enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            <span className={`pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${openAPI?.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
           </button>
         </div>
         {openAPIError && <p role="alert" className="text-[11px] text-red-600 dark:text-red-400">{openAPIError}</p>}
