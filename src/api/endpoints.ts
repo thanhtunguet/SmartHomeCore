@@ -28,6 +28,7 @@ import type {
   DeviceUpdate,
   Health,
   SystemInfo,
+  OpenAPISettings,
   Page,
   PortForward,
   PortForwardCreate,
@@ -136,6 +137,9 @@ export const getCommand = (id: string) => request<ApiCommand>(`/api/v1/commands/
 // system
 export const getSystemMetrics = () => request<ApiSystemMetrics>('/api/v1/system/metrics');
 export const getSystemInfo = () => request<SystemInfo>('/api/v1/system/info');
+export const getOpenAPISettings = () => request<OpenAPISettings>('/api/v1/system/settings/openapi');
+export const updateOpenAPISettings = (enabled: boolean) =>
+  request<OpenAPISettings>('/api/v1/system/settings/openapi', { method: 'PUT', body: { enabled } });
 export const getControllerKey = () => request<ControllerKey>('/api/v1/system/controller-key');
 
 // ddns

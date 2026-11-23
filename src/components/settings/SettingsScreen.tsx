@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { getSystemInfo } from '../../api/endpoints';
-import type { SystemInfo } from '../../api/schema';
+import { getOpenAPISettings, getSystemInfo, updateOpenAPISettings } from '../../api/endpoints';
+import type { OpenAPISettings, SystemInfo } from '../../api/schema';
 import { ServiceKeysSection } from './ServiceKeysSection';
 import { AlertChannelsSection } from './AlertChannelsSection';
 import { ConfirmDialog } from '../common/ConfirmDialog';
@@ -47,8 +47,12 @@ export const SettingsScreen: React.FC = () => {
   const [confirmReset, setConfirmReset] = useState(false);
   // Read-only server configuration; absent when the Controller predates GET /system/info.
   const [info, setInfo] = useState<SystemInfo | null>(null);
+  const [openAPI, setOpenAPI] = useState<OpenAPISettings | null>(null);
+  const [openAPILoading, setOpenAPILoading] = useState(false);
+  const [openAPIError, setOpenAPIError] = useState<string | null>(null);
   useEffect(() => {
     getSystemInfo().then(setInfo).catch(() => setInfo(null));
+    getOpenAPISettings().then(setOpenAPI).catch(() => setOpenAPIError('Could not load the OpenAPI setting.'));
   }, []);
 
   useEffect(() => {
@@ -62,6 +66,19 @@ export const SettingsScreen: React.FC = () => {
     });
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
+  };
+
+  const handleOpenAPIToggle = async () => {
+    if (!openAPI || openAPILoading) return;
+    setOpenAPILoading(true);
+    setOpenAPIError(null);
+    try {
+      setOpenAPI(await updateOpenAPISettings(!openAPI.enabled));
+    } catch {
+      setOpenAPIError('Could not save the OpenAPI setting.');
+    } finally {
+      setOpenAPILoading(false);
+    }
   };
 
   const handleResetLocal = () => {
@@ -153,26 +170,6 @@ export const SettingsScreen: React.FC = () => {
           {info?.command_deadlines?.wake_seconds !== undefined && row('Command deadlines', `wake ${info.command_deadlines.wake_seconds} s · shutdown ${info.command_deadlines.shutdown_seconds ?? '—'} s`)}
           {info?.retention_days !== undefined && row('History retention', `${info.retention_days} days`)}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <a
-            href="/api/docs/"
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-lg transition-colors"
-          >
-            <ExternalLink size={13} />
-            <span>Swagger UI (/api/docs)</span>
-          </a>
-          <a
-            href="/api/openapi.json"
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-700 dark:text-neutral-300 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-lg transition-colors"
-          >
-            <ExternalLink size={13} />
-            <span>openapi.json</span>
-          </a>
-        </div>
       </section>
 
       {/* Agent trust */}
@@ -207,6 +204,44 @@ export const SettingsScreen: React.FC = () => {
 
       {/* Alert channels (Telegram) */}
       <AlertChannelsSection />
+
+      {/* OpenAPI and Swagger UI */}
+      <section className={cardCls}>
+        <div className={headCls}>
+          <h2 className="font-semibold text-sm text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+            <ExternalLink size={16} className="text-neutral-500" />
+            <span>OpenAPI</span>
+          </h2>
+          <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
+            Control public access to the OpenAPI document and offline Swagger UI. Enabled endpoints are limited to 2 requests per second per client IP.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="font-medium text-neutral-800 dark:text-neutral-200">
+              {openAPI ? (openAPI.enabled ? 'Enabled' : 'Disabled') : 'Loading…'}
+            </p>
+            {openAPI?.enabled && (
+              <div className="flex flex-wrap gap-3 mt-1">
+                <a className="text-emerald-700 dark:text-emerald-300 hover:underline" href="/api/docs/" target="_blank" rel="noreferrer">Swagger UI</a>
+                <a className="text-neutral-600 dark:text-neutral-400 hover:underline" href="/api/swagger.json" target="_blank" rel="noreferrer">swagger.json</a>
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={openAPI?.enabled ?? false}
+            aria-label="Enable OpenAPI and Swagger UI"
+            disabled={!openAPI || openAPILoading}
+            onClick={() => void handleOpenAPIToggle()}
+            className={`relative h-6 w-11 rounded-full transition-colors disabled:opacity-50 ${openAPI?.enabled ? 'bg-emerald-600' : 'bg-neutral-300 dark:bg-neutral-700'}`}
+          >
+            <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${openAPI?.enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </button>
+        </div>
+        {openAPIError && <p role="alert" className="text-[11px] text-red-600 dark:text-red-400">{openAPIError}</p>}
+      </section>
 
       {/* Browser preferences */}
       <form onSubmit={handleSave} className={cardCls}>

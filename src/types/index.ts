@@ -158,7 +158,7 @@ export interface SystemMetrics {
   };
 }
 
-/** Browser-local preferences. The Controller has no settings API (see docs/reports). */
+/** Browser-local preferences; Controller-wide OpenAPI settings are managed through the REST API. */
 export interface AppSettings {
   monitoring: {
     defaultIntervalSec: number;
