@@ -117,16 +117,17 @@ from the same origin. No CDN at runtime.
 
 ---
 
-## ADR-009 — Frontend as a git submodule, embedded into the binary
+## ADR-009 — Frontend integrated into the repository and embedded into the binary
 
 **Context.** The web UI (HomeCoreUI: React 19, Vite 8, Tailwind 4) lives in its own repository. The
 Controller must serve it without a separate web server (brief §3.1, MVP "static file serving"), and
 `go build` must keep working with `CGO_ENABLED=0` for all seven targets without Node.
 
 **Decision.**
-- The UI is the git submodule `frontend/`. `make ui-build` builds it into `web/static/`, which
-  `//go:embed all:static` ships in the binary. `web/static/*` is git-ignored except `.gitkeep`, so
-  the embed directive is valid on a fresh checkout.
+- The UI source is tracked directly in `frontend/` in the HomeCore repository; its former standalone
+  repository history is retained through a subtree import. `make ui-build` builds it into
+  `web/static/`, which `//go:embed all:static` ships in the binary. `web/static/*` is git-ignored
+  except `.gitkeep`, so the embed directive is valid on a fresh checkout.
 - If `web/static/index.html` is absent, `web.Static()` serves `web/placeholder/index.html` instead.
 - `make build` / `make cross` do not need Node. `make build-full` builds the UI first; release
   builds must use it.
@@ -136,9 +137,10 @@ Controller must serve it without a separate web server (brief §3.1, MVP "static
 - Wire types in the UI are hand-written from `api/openapi.yaml` (the generator needs TypeScript 5,
   the UI uses 7). This is a known drift risk (GAP-INF-06).
 
-**Consequences.** Frontend and backend release independently but are pinned together by the
-submodule pointer. UI changes must be committed in the submodule first, then the pointer updated.
-The submodule URL is SSH; CI needs a key or an HTTPS URL.
+**Consequences.** Frontend and backend source live in one repository and are built from the same
+checkout. The GitHub Actions workflow no longer fetches a submodule; UI changes are committed with
+the rest of HomeCore. The historical subtree import may be updated from the former upstream only
+through an explicit subtree pull.
 
 ---
 

@@ -25,6 +25,7 @@ import (
 	"github.com/thanhtunguet/homecore/internal/portforward"
 	"github.com/thanhtunguet/homecore/internal/servicekey"
 	"github.com/thanhtunguet/homecore/internal/storage"
+	"github.com/thanhtunguet/homecore/internal/systemsettings"
 	"github.com/thanhtunguet/homecore/internal/version"
 )
 
@@ -32,11 +33,12 @@ import (
 type Handlers struct {
 	gen.Unimplemented
 
-	DB   *storage.DB
-	Auth *auth.Service // nil: the auth operations answer 501
-	Log  *slog.Logger
-	Now  func() time.Time
-	Info InfoSource // what GET /system/info reports; set by the router
+	DB             *storage.DB
+	SystemSettings *systemsettings.Service
+	Auth           *auth.Service // nil: the auth operations answer 501
+	Log            *slog.Logger
+	Now            func() time.Time
+	Info           InfoSource // what GET /system/info reports; set by the router
 
 	// Device management (Phase 2). Each nil service makes its operations answer 501.
 	Devices  *devices.Service    // device CRUD, history
@@ -114,18 +116,22 @@ type InfoSource struct {
 
 // GetSystemInfo reports version, mode and effective defaults. Nothing secret or file-system
 // related (data dir, TLS paths, keys) is exposed.
-func (h *Handlers) GetSystemInfo(w http.ResponseWriter, _ *http.Request) {
+func (h *Handlers) GetSystemInfo(w http.ResponseWriter, r *http.Request) {
 	c := h.Info.Controller
 	mode := h.Info.Mode
 	if mode == "" {
 		mode = string(config.ModeController)
+	}
+	apiDocs := false
+	if h.SystemSettings != nil {
+		apiDocs, _ = h.SystemSettings.OpenAPIEnabled(r.Context())
 	}
 	info := gen.SystemInfo{
 		Version:                version.Version,
 		Mode:                   gen.SystemInfoMode(mode),
 		Listen:                 &c.Listen,
 		Tls:                    ptr(c.TLS.Enabled()),
-		ApiDocs:                &c.APIDocs,
+		ApiDocs:                &apiDocs,
 		AccessTokenTtlSeconds:  ptr(int(c.Auth.AccessTokenTTL.Seconds())),
 		RefreshTokenTtlSeconds: ptr(int(c.Auth.RefreshTokenTTL.Seconds())),
 		RetentionDays:          &c.RetentionDays,

@@ -3,10 +3,6 @@ name: Build
 # Builds the frontend (zip) and the Linux backend packages (amd64 + arm64).
 # Every run uploads the files as workflow artifacts. A tag `vX.Y.Z` also publishes them as a GitHub Release.
 #
-# The `frontend/` git submodule (HomeCoreUI, must be public) is declared in .gitmodules with an SSH URL.
-# CI does not change .gitmodules: the `frontend` job rewrites git@github.com: to https://github.com/ in its
-# own git config before fetching the submodule, so no SSH key or token is needed.
-
 on:
   push:
     branches: [main]
@@ -48,14 +44,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Fetch the frontend submodule over HTTPS
-        run: |
-          # .gitmodules keeps the SSH URL; rewrite it for this runner only (the config is not committed).
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git submodule sync frontend
-          git submodule update --init frontend # the commit pinned by the gitlink
-          git submodule status frontend
-          test -f frontend/package.json
       - uses: pnpm/action-setup@v4 # must run before setup-node so `cache: pnpm` finds pnpm
         with:
           version: 10 # the lockfile (lockfileVersion 9.0) is read by pnpm 9+
@@ -96,7 +84,7 @@ jobs:
       VERSION: ${{ needs.meta.outputs.version }}
       COMMIT: ${{ needs.meta.outputs.commit }}
     steps:
-      - uses: actions/checkout@v4 # no submodule: the UI comes from the frontend job
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-go@v5

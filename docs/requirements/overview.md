@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Source | [`BRIEF.md`](../../BRIEF.md) (Technical Brief v0.1, Vietnamese) |
-| Last reviewed | 2026-11-18 (port forwarding); 2026-11-15 (alerts; MCP server); 2026-11-14 (service account keys) |
+| Last reviewed | 2026-11-23 (OpenAPI settings); 2026-11-18 (port forwarding); 2026-11-15 (alerts; MCP server); 2026-11-14 (service account keys) |
 | Owner | Project maintainers |
 
 This document turns the brief into the project's requirements baseline. It records which brief
@@ -62,7 +62,7 @@ One build supports both roles; configuration selects `controller`, `agent` or `b
 | Service account keys (added after the brief, not in it) | **Implemented**: server-generated Ed25519 keys (private key sealed in the database), TTL default 1 year, scopes `legacy`/`mcp`, create/list/revoke by a user, self-rotation by the key with a 1-minute grace and idempotent retry, audit (ADR-018) | [authentication.md](authentication.md) REQ-AUTH-021..027, [http-api.md](http-api.md) REQ-API-029..031, [storage-and-secrets.md](storage-and-secrets.md) REQ-SEC-006 |
 | Alerts (added after the brief, not in it) | **Implemented**: alert channels with a Telegram adapter (bot token + target user id, sealed), events for a new public IP, wake/shutdown requests and a device that changes status outside HomeCore's control, delivery queue with retries, test endpoint, audit; not yet run against the real Telegram (ADR-021) | [alerts.md](alerts.md), [http-api.md](http-api.md) REQ-API-032, [storage-and-secrets.md](storage-and-secrets.md) REQ-SEC-007 |
 | Port forwarding (added after the brief, not in it) | **Implemented**: rules that make the Controller relay TCP and/or UDP (`tcp`, `udp`, `universal`) from a chosen local interface (default `0.0.0.0`) to a target; each rule is named and has a stored on/off switch; enabled rules are restarted after a Controller restart and retried while they cannot bind; session-only API, audit; not yet run on Linux or in a browser (ADR-022) | [port-forwarding.md](port-forwarding.md), [http-api.md](http-api.md) REQ-API-033 |
-| Swagger UI at `/api/docs` | **Implemented** | [http-api.md](http-api.md) |
+| Swagger UI at `/api/docs` | **Implemented**; off by default and enabled through Settings | [http-api.md](http-api.md) REQ-API-002/003/034; [web-ui.md](web-ui.md) REQ-UI-032 |
 | Static file serving | **Implemented** (UI embedded via `make build-full`; placeholder otherwise) | [http-api.md](http-api.md), [web-ui.md](web-ui.md) |
 
 ### 4.2 Non-goals
@@ -129,14 +129,14 @@ Every point of the brief, in order. "Ref" points to the document that covers the
 |---|-------------|--------|-----|
 | 3.1.1 | REST API with JSON | Implemented | REQ-API-001 |
 | 3.1.2 | JWT authentication and authorization | Implemented (authentication; authorization = any authenticated user, ADR-011) | REQ-API-007, REQ-API-008, REQ-AUTH-004..012 |
-| 3.1.3 | Swagger UI at `/api/docs` | Implemented | REQ-API-003 |
-| 3.1.4 | OpenAPI spec at `/api/openapi.json` | Implemented | REQ-API-002 |
+| 3.1.3 | Swagger UI at `/api/docs` | Implemented; DB setting defaults off | REQ-API-003, REQ-UI-032 |
+| 3.1.4 | OpenAPI spec at `/api/openapi.json` and `/api/swagger.json` | Implemented; DB setting defaults off | REQ-API-002 |
 | 3.1.5 | Static frontend serving | Implemented (UI wired to the API; backend endpoints pending) | REQ-API-005, REQ-UI-001..004 |
 | 3.1.6 | Health/readiness endpoints | Implemented | REQ-API-004 |
 | 3.1.7 | Request logging, timeout, graceful shutdown | Implemented | REQ-API-010, REQ-RT-005 |
 | 3.1.8 | CORS, rate limiting, request body limit | Implemented (untested) | REQ-API-011..013 |
 | 3.1.9 | `net/http` + `chi`; spec-first or codegen | Implemented (spec-first + oapi-codegen) | ADR-006 |
-| 3.1.10 | Namespace `/api/v1`, `/api/docs`, `/api/openapi.json`, `/healthz`, `/readyz` | Implemented | REQ-API-001 |
+| 3.1.10 | Namespace `/api/v1`, `/api/docs`, `/api/openapi.json`, `/api/swagger.json`, `/healthz`, `/readyz` | Implemented | REQ-API-001 |
 | 3.1.11 | Swagger UI works offline, no CDN | Implemented | REQ-API-003, ADR-008 |
 
 ### §3.2 Device registry

@@ -1,13 +1,13 @@
 # HomeCore — Architecture Design
 
-|                |                                                                                                                                                                                                                                                                                                                                                                                                                 |
-|----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Status         | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1                                                                                                                                                                                                                                                                                                                                                        |
-| Last reviewed  | 2026-11-18 (port forwarding, ADR-022); 2026-11-16 (Android mobile Controller integration); 2026-11-15 (alerts, ADR-021; earlier: MCP server, ADR-020; earlier: portable Agent, ADR-019; earlier: 2026-11-14 service account keys; legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
-| Requirements   | [requirements/overview.md](../requirements/overview.md)                                                                                                                                                                                                                                                                                                                                                         |
-| Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs)                                                                                                                                                                                                                                                                                                       |
-| API contract   | [api/openapi.yaml](../../api/openapi.yaml) (source of truth)                                                                                                                                                                                                                                                                                                                                                    |
-| Roadmap        | [plans/roadmap.md](../plans/roadmap.md)                                                                                                                                                                                                                                                                                                                                                                         |
+|                |                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Status         | **v0.2**, derived from [`BRIEF.md`](../../BRIEF.md) v0.1                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Last reviewed  | 2026-11-24 (frontend integrated into the repository, ADR-009); 2026-11-23 (database-controlled OpenAPI settings); 2026-11-18 (port forwarding, ADR-022); 2026-11-16 (Android mobile Controller integration); 2026-11-15 (alerts, ADR-021; earlier: MCP server, ADR-020; earlier: portable Agent, ADR-019; earlier: 2026-11-14 service account keys; legacy endpoints and scoped tokens; local interface names; Phase 4: DDNS and system metrics; earlier: Phase 3 shutdown dispatch, Controller key, agent status, activity feed) |
+| Requirements   | [requirements/overview.md](../requirements/overview.md)                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Related design | [database.md](database.md) · [agent-protocol.md](agent-protocol.md) · [decisions.md](decisions.md) (ADRs)                                                                                                                                                                                                                                                                                                                                                                     |
+| API contract   | [api/openapi.yaml](../../api/openapi.yaml) (source of truth)                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Roadmap        | [plans/roadmap.md](../plans/roadmap.md)                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 ---
 
@@ -158,8 +158,8 @@ internal/
     migrations/          versioned *.sql files
   scheduler/             tiny interval runner with jitter
   platform/              OS adapters: power control, metrics, terminal no-echo input (`tty`) (build-tagged)
-web/                     embedded UI (static/ = build of the frontend submodule, placeholder/ = fallback) + offline Swagger UI assets
-frontend/                git submodule (HomeCoreUI source; built by `make ui-build`, see ADR-009)
+web/                     embedded UI (static/ = build of frontend source, placeholder/ = fallback) + offline Swagger UI assets
+frontend/                HomeCoreUI source integrated into this repository (built by `make ui-build`, see ADR-009)
 configs/                 example configuration
 deploy/                  systemd units, polkit rules
 docs/                    requirements, design, plans, changelogs (see docs/README.md)
@@ -191,8 +191,12 @@ implementation or a test that needs it.
 - Middleware order: request-id → client-ip (X-Forwarded-For only from `trusted_proxies` CIDRs) → recoverer → structured access log → body limit (1 MiB)
   → timeout (30 s) → CORS (allowlist, off by default) → rate limit (per-IP, stricter on `/auth/*`)
   → JWT auth (per-operation, driven by the spec's `security` requirements).
-- `GET /api/openapi.json` serves the embedded spec; `GET /api/docs` serves Swagger UI from embedded
-  assets (no CDN). `/healthz` = process alive; `/readyz` = DB reachable and migrations applied.
+- `/api/openapi.json` and `/api/swagger.json` serve the embedded spec; `/api/docs` serves Swagger
+  UI from embedded assets (no CDN). Documentation routes read the persisted `openapi_enabled`
+  setting on every request and fail closed when disabled or unavailable. A per-IP limiter allows 2
+  requests per second for the docs index and spec routes; static UI assets use the same setting gate
+  but are not rate-limited so the page can load. `/healthz` = process alive; `/readyz` = DB reachable
+  and migrations applied.
 - Errors use one JSON shape: `{"error": {"code": "...", "message": "..."}}`.
 - Optional TLS (`controller.tls.cert_file/key_file`).
 
@@ -561,7 +565,7 @@ Namespace `/api/v1`; full contract in `api/openapi.yaml`. Summary (brief §4, pl
 | ✚GET/POST        | `/api/v1/port-forwards` · ✚GET/PATCH/DELETE `/port-forwards/{id}`                                          | user (session only; scoped keys get `403`); `enabled` is the on/off switch             |
 | ✚GET/POST        | `/api/v1/alerts/channels` · ✚GET/PATCH/DELETE `/alerts/channels/{id}` · ✚POST `/alerts/channels/{id}/test` | user (session only; scoped keys get `403`)                                             |
 | ✚POST            | `/api/v1/ddns/cloudflare/zones` · `/ddns/cloudflare/zones/{zone_id}/records`                               | user; read-only lookups for the form dropdowns (`POST` so the token stays out of URLs) |
-| GET              | `/healthz`, `/readyz`, `/api/openapi.json`, `/api/docs`                                                    | public                                                                                 |
+| GET              | `/healthz`, `/readyz`, `/api/openapi.json`, `/api/swagger.json`, `/api/docs`                               | public (docs routes require the persisted setting to be enabled)                       |
 
 Pagination: `?limit=&cursor=` (`limit` 1..200, default 50; an explicit `0` or a larger value is
 `400`), no total count; `next_cursor` is present only when more items exist. Order is fixed:

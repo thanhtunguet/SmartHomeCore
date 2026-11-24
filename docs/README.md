@@ -14,49 +14,49 @@ docs/
 
 ## requirements/
 
-| Document | Content |
-|----------|---------|
-| [overview.md](requirements/overview.md) | Product summary, goals, platforms, MVP scope, non-goals, **brief traceability matrix** |
-| [runtime-and-configuration.md](requirements/runtime-and-configuration.md) | `REQ-RT`: modes, configuration, lifecycle, logging, mobile bindings, cross-compile |
-| [http-api.md](requirements/http-api.md) | `REQ-API`: REST foundation, docs, health, authN/authZ, middleware |
-| [authentication.md](requirements/authentication.md) | `REQ-AUTH`: passwords, JWT, refresh rotation and grace window, audit, `homecore user`, legacy client tokens (`homecore token`) |
-| [devices-and-commands.md](requirements/devices-and-commands.md) | `REQ-DEV`, `REQ-MON`, `REQ-CMD`, `REQ-RET`: device registry, monitor, wake and command lifecycle, retention |
-| [storage-and-secrets.md](requirements/storage-and-secrets.md) | `REQ-ST`, `REQ-SEC`: SQLite, migrations, master key, sealing |
-| [ddns.md](requirements/ddns.md) | `REQ-DDNS`, `REQ-SYS`: public-IP quorum, Cloudflare client, DDNS configs and syncer, system metrics |
-| [shutdown-agent.md](requirements/shutdown-agent.md) | `REQ-AG`: signed commands, replay protection, least-privilege execution |
-| [alerts.md](requirements/alerts.md) | `REQ-ALERT`: alert channels (Telegram), events for IP change, wake/shutdown and out-of-control status changes, delivery |
-| [port-forwarding.md](requirements/port-forwarding.md) | `REQ-PF`: TCP/UDP port forwarding rules, local interface, stored on/off switch, restore after restart |
-| [mcp.md](requirements/mcp.md) | `REQ-MCP`: MCP server for AI agents (`POST /api/v1/mcp`), tools, authentication by service account key |
-| [web-ui.md](requirements/web-ui.md) | `REQ-UI`: frontend submodule, embedded build, session, flows against the REST API |
+| Document                                                                  | Content                                                                                                                        |
+|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
+| [overview.md](requirements/overview.md)                                   | Product summary, goals, platforms, MVP scope, non-goals, **brief traceability matrix**                                         |
+| [runtime-and-configuration.md](requirements/runtime-and-configuration.md) | `REQ-RT`: modes, configuration, lifecycle, logging, mobile bindings, cross-compile                                             |
+| [http-api.md](requirements/http-api.md)                                   | `REQ-API`: REST foundation, docs, health, authN/authZ, middleware                                                              |
+| [authentication.md](requirements/authentication.md)                       | `REQ-AUTH`: passwords, JWT, refresh rotation and grace window, audit, `homecore user`, legacy client tokens (`homecore token`) |
+| [devices-and-commands.md](requirements/devices-and-commands.md)           | `REQ-DEV`, `REQ-MON`, `REQ-CMD`, `REQ-RET`: device registry, monitor, wake and command lifecycle, retention                    |
+| [storage-and-secrets.md](requirements/storage-and-secrets.md)             | `REQ-ST`, `REQ-SEC`: SQLite, migrations, master key, sealing                                                                   |
+| [ddns.md](requirements/ddns.md)                                           | `REQ-DDNS`, `REQ-SYS`: public-IP quorum, Cloudflare client, DDNS configs and syncer, system metrics                            |
+| [shutdown-agent.md](requirements/shutdown-agent.md)                       | `REQ-AG`: signed commands, replay protection, least-privilege execution                                                        |
+| [alerts.md](requirements/alerts.md)                                       | `REQ-ALERT`: alert channels (Telegram), events for IP change, wake/shutdown and out-of-control status changes, delivery        |
+| [port-forwarding.md](requirements/port-forwarding.md)                     | `REQ-PF`: TCP/UDP port forwarding rules, local interface, stored on/off switch, restore after restart                          |
+| [mcp.md](requirements/mcp.md)                                             | `REQ-MCP`: MCP server for AI agents (`POST /api/v1/mcp`), tools, authentication by service account key                         |
+| [web-ui.md](requirements/web-ui.md)                                       | `REQ-UI`: integrated frontend source, embedded build, session, flows against the REST API                                      |
 
 ## design/
 
-| Document | Content |
-|----------|---------|
-| [architecture.md](design/architecture.md) | Architecture design: brief analysis, runtime model, code layout, modules, state machines, API, security, platforms |
-| [database.md](design/database.md) | Database design: conventions, settings, ER diagram, every table, indexes, lifecycle, migrations |
-| [agent-protocol.md](design/agent-protocol.md) | Normative Controller → Agent protocol v1 |
-| [decisions.md](design/decisions.md) | Architecture Decision Records (ADR-001…) |
+| Document                                      | Content                                                                                                            |
+|-----------------------------------------------|--------------------------------------------------------------------------------------------------------------------|
+| [architecture.md](design/architecture.md)     | Architecture design: brief analysis, runtime model, code layout, modules, state machines, API, security, platforms |
+| [database.md](design/database.md)             | Database design: conventions, settings, ER diagram, every table, indexes, lifecycle, migrations                    |
+| [agent-protocol.md](design/agent-protocol.md) | Normative Controller → Agent protocol v1                                                                           |
+| [decisions.md](design/decisions.md)           | Architecture Decision Records (ADR-001…)                                                                           |
 
 The REST contract itself is [`api/openapi.yaml`](../api/openapi.yaml) (source of truth), and a
 running Controller serves it at `/api/docs`.
 
 ## plans/
 
-| Document | Content |
-|----------|---------|
+| Document                       | Content                                             |
+|--------------------------------|-----------------------------------------------------|
 | [roadmap.md](plans/roadmap.md) | Phase checklists, next steps, backlog of known gaps |
 
 ## reports/
 
-| Document | Content |
-|----------|---------|
+| Document                                                           | Content                                                                                               |
+|--------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
 | [frontend-api-integration.md](reports/frontend-api-integration.md) | Frontend ↔ API wiring: what was connected, gaps (`GAP-*`) and inconsistencies (`INC-*`), verification |
 
 ## changelogs/
 
-| Document | Content |
-|----------|---------|
+| Document                          | Content                        |
+|-----------------------------------|--------------------------------|
 | [README.md](changelogs/README.md) | Convention, template and index |
 
 ## Documentation rules

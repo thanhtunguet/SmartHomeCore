@@ -115,3 +115,32 @@ func bytesPtr(v uint64) *int64 {
 	}
 	return ptr(int64(v))
 }
+
+func (h *Handlers) GetOpenAPISettings(w http.ResponseWriter, r *http.Request) {
+	if h.SystemSettings == nil {
+		httpx.WriteError(w, http.StatusNotImplemented, "not_implemented", "system settings are not configured")
+		return
+	}
+	enabled, err := h.SystemSettings.OpenAPIEnabled(r.Context())
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "internal", "could not read OpenAPI setting")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, gen.OpenAPISettings{Enabled: enabled})
+}
+
+func (h *Handlers) UpdateOpenAPISettings(w http.ResponseWriter, r *http.Request) {
+	if h.SystemSettings == nil {
+		httpx.WriteError(w, http.StatusNotImplemented, "not_implemented", "system settings are not configured")
+		return
+	}
+	var req gen.OpenAPISettings
+	if !decodeStrict(w, r, &req) {
+		return
+	}
+	if err := h.SystemSettings.SetOpenAPIEnabled(r.Context(), req.Enabled, h.Now()); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "internal", "could not save OpenAPI setting")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, req)
+}
