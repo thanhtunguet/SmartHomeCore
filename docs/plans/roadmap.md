@@ -1,25 +1,25 @@
 # Roadmap
 
-| | |
-|---|---|
-| Source | Brief §7 (phases), §8 (MVP); [architecture](../design/architecture.md) |
-| Last updated | 2026-11-23 (database-controlled OpenAPI docs); 2026-11-18 (port forwarding; earlier: 2026-11-15 alerts UI; earlier: alerts backend; MCP server; earlier: 2026-11-14 service account keys; legacy endpoints; build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
+|              |                                                                                                                                                                                                                                                                                                                                                                                                   |
+|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Source       | Brief §7 (phases), §8 (MVP); [architecture](../design/architecture.md)                                                                                                                                                                                                                                                                                                                            |
+| Last updated | 2026-11-24 (frontend subtree integrated; CI no longer fetches a submodule); 2026-11-23 (database-controlled OpenAPI docs); 2026-11-18 (port forwarding; earlier: 2026-11-15 alerts UI; earlier: alerts backend; MCP server; earlier: 2026-11-14 service account keys; legacy endpoints; build/release workflow added; Phase 4 done against fakes; real Cloudflare run and Linux metrics run open) |
 
 Legend: `[x]` done and verified · `[~]` partially done · `[ ]` not started.
 Tick items in the same change that completes them, and add a changelog entry.
 
 ## Status at a glance
 
-| Phase | Scope | Status |
-|-------|-------|--------|
-| 0 | Android compatibility spike (parallel to Phase 1) | Started: cross-compile verified |
-| 1 | Core foundation | **Done** |
-| 1b | JWT authentication (MVP; the brief places it under §3.1) | **Done** |
-| 2 | Device management | **Done** |
-| 3 | Secure Agent | **Done** except host validation (systemd + polkit on a real Debian/Ubuntu host, open) |
-| 4 | DDNS and system monitoring | **Done** except a run against the real Cloudflare and the real IP providers (open); metrics exercised on macOS only |
-| 5 | Android integration | Binding surface only |
-| 6 | Hardening | Not started |
+| Phase | Scope                                                    | Status                                                                                                              |
+|-------|----------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
+| 0     | Android compatibility spike (parallel to Phase 1)        | Started: cross-compile verified                                                                                     |
+| 1     | Core foundation                                          | **Done**                                                                                                            |
+| 1b    | JWT authentication (MVP; the brief places it under §3.1) | **Done**                                                                                                            |
+| 2     | Device management                                        | **Done**                                                                                                            |
+| 3     | Secure Agent                                             | **Done** except host validation (systemd + polkit on a real Debian/Ubuntu host, open)                               |
+| 4     | DDNS and system monitoring                               | **Done** except a run against the real Cloudflare and the real IP providers (open); metrics exercised on macOS only |
+| 5     | Android integration                                      | Binding surface only                                                                                                |
+| 6     | Hardening                                                | Not started                                                                                                         |
 
 ## Next up (ordered)
 
@@ -52,7 +52,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [x] SQLite + versioned migrations + full initial schema (REQ-ST-*)
 - [x] Master key + AES-GCM sealing (REQ-SEC-001/002)
 - [x] Static frontend serving with SPA fallback (REQ-API-005)
-- [x] Frontend submodule wired to the REST contract: login, devices, wake, shutdown, DDNS, activity, system; embedded build with placeholder fallback (REQ-UI-001..015, ADR-009/010). Verified against a mock only; re-run against the real Controller per phase
+- [x] Frontend integrated at `frontend/`, wired to the REST contract: login, devices, wake, shutdown, DDNS, activity, system; embedded build with placeholder fallback (REQ-UI-001..015, ADR-009/010). Verified against a mock only; re-run against the real Controller per phase
 
 ## Phase 1b — Authentication ✅
 
@@ -124,7 +124,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [x] `deploy/README.md` and the package README: opt-in drop-in for ports below 1024
 - [ ] Run on a Linux host (and the packaged systemd unit with and without the capability drop-in), on Android, and with a real IPv6 listener
 - [ ] Open the screen in a browser (switch, form, interface picker, mobile bar with seven tabs)
-- [ ] Frontend submodule: commit in HomeCoreUI and bump the pointer
+- [x] Frontend subtree integrated into this repository; its imported Git history is retained (ADR-009)
 
 ## Legacy compatibility (ADR-017)
 
@@ -139,7 +139,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [x] `x-token-scopes` in the spec and `Requirement.Scopes` in `middleware.Authorize`; scopes `legacy` and `mcp` (REQ-API-029, REQ-AUTH-023)
 - [x] `POST/GET /service-account-keys`, `DELETE /service-account-keys/{id}`, `POST /auth/service-key/rotate` with grace window and idempotent retry (REQ-API-030, REQ-AUTH-024..026)
 - [x] Audit and retention (REQ-AUTH-027)
-- [x] UI card for keys in Settings: list, create (name, scope, TTL), one-time key panel, revoke (REQ-UI-023/024; frontend submodule, commit it in HomeCoreUI and bump the pointer)
+- [x] UI card for keys in Settings: list, create (name, scope, TTL), one-time key panel, revoke (REQ-UI-023/024; frontend source is now part of this repository)
 - [ ] `homecore` subcommand to create a key without the API (bootstrap on a headless box)
 
 ## MCP server (ADR-020)
@@ -158,7 +158,7 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [x] Hooks: new public IP (`ddns.Service.Sync`), wake/shutdown requests (`commands.Engine.Request`), device status change outside HomeCore's control (`monitoring` transition hook) (REQ-ALERT-002..004)
 - [x] `/alerts/channels` CRUD and `/test` in the spec and the handlers, audited (REQ-API-032, REQ-ALERT-009/010)
 - [~] Run once against the real Telegram: **skipped by the owner's decision (2026-11-15)**, the Bot API is mature; everything ran against `alertstest`. A channel that fails shows its `last_error` in Settings
-- [x] UI: Settings card for alert channels (list, add/edit Telegram with token + user id, events, pause, test button, `last_error`, delete) and regenerated frontend API types; `make ui-check` passes (REQ-UI-030). Commit in HomeCoreUI and bump the submodule pointer
+- [x] UI: Settings card for alert channels (list, add/edit Telegram with token + user id, events, pause, test button, `last_error`, delete) and regenerated frontend API types; `make ui-check` passes (REQ-UI-030)
 - [ ] More adapters (the owner said "later"): each is one `Factory` plus a spec enum value (REQ-ALERT-011)
 
 ## Phase 5 — Android integration
@@ -176,39 +176,39 @@ Tick items in the same change that completes them, and add a changelog entry.
 - [ ] CI pipeline: lint, test, race, `check-generated`, `cross`
 - [ ] Release pipeline (partial): GitHub Actions `build.yml` builds the frontend zip and Linux amd64/arm64 packages and publishes them on `v*` tags; other targets (linux/arm, macOS, Windows, Android) still open
 - [x] Windows agent power adapter (`InitiateSystemShutdownExW`, run elevated; not yet run on a Windows host)
-- [x] Portable Agent (ADR-019): `--agent-id` / `--trusted-controller` / `--agent-listen`, setup prompt that writes the systemd unit or the Windows shortcut, UI panel with the command per OS (REQ-AG-016..019, REQ-UI-025; frontend submodule: commit it in HomeCoreUI and bump the pointer; real Windows and Linux hosts not tested)
+- [x] Portable Agent (ADR-019): `--agent-id` / `--trusted-controller` / `--agent-listen`, setup prompt that writes the systemd unit or the Windows shortcut, UI panel with the command per OS (REQ-AG-016..019, REQ-UI-025; real Windows and Linux hosts not tested)
 - [ ] Windows Service wrapper for the Agent, and a Windows release package
 
 ## Backlog (known gaps from requirement docs)
 
-| Item | Source |
-|------|--------|
-| Make the audit write for `device.shutdown` blocking (refuse the action when it cannot be recorded), if the owner wants that stricter rule | ADR-015, REQ-SHD-009 |
-| Controller key rotation (insert a new key, retire the old, let agents trust both) | REQ-SHD known gaps |
-| Health-job interval as a config key; pin or accept self-signed agent certificates for `https` bindings | REQ-SHD known gaps |
-| Activity feed from sources other than `audit_log` (monitor transitions) once the UI needs them; DDNS changes and record updates are already audited | ADR-015 |
-| Cap the agent's accepted-`command_id` map (the protocol spec says caches are bounded) | REQ-AG-008 gap |
-| Signed agent acknowledgements (protocol v2) | agent-protocol §7 |
-| Signed agent announce for automatic IP updates | ADR-002 |
-| Tests for CLI flag precedence | REQ-RT-003 gap (the agent flags merge is tested, REQ-AG-016/017; the `flag` declarations are not) |
-| launchd plist from the Agent setup prompt (macOS); TLS flags for the Agent so an `https` binding needs no config file | ADR-019 |
-| Run the generated Windows shortcut and Linux unit on real hosts; check the shortcut asks for elevation | REQ-AG-019 |
-| Test `/readyz` 503 path and `WithTx` rollback | REQ-API-004, REQ-ST-004 |
-| Re-run the UI against the real Controller as Phases 3/4 land (UI is verified only against a mock; Phase 2 verified the API shapes with curl against `mappers.ts`, not the running UI) | GAP-BE-01..03 |
-| Hostname field in the device form (once hostname-based probing exists) | GAP-API-15 |
-| Run the frontend checks (`make ui-check`) in CI once a CI pipeline exists | GAP-INF-06, 07, REQ-UI-016 |
-| `homecore user disable\|enable\|delete` (the `users.disabled` flag is honoured but only settable with SQL); UI for changing the password | GAP-API-14, REQ-AUTH known gaps |
-| Cut off access tokens at logout/password change (token version or `jti` deny-list), if the 15 min window ever matters | REQ-AUTH known gaps |
-| Per-account login lockout (only per-IP limit exists); separate rate-limit bucket for `refresh`/`logout` | REQ-AUTH known gaps |
-| Account creation on Android (no CLI): decide in Phase 5 how the host app calls `auth.Accounts` through `mobile` | REQ-RT known gaps |
-| ~~Release pipeline must run `make ui-build` before `make cross`~~ done for Linux amd64/arm64 in `.github/workflows/build.yml`; remains for the other `make cross` targets | GAP-INF-10 |
-| Persist the monitor's consecutive-failure counters across restarts (today only the status survives) | REQ-MON-004 known gap |
-| Shorten the deadline sweep (5 s) or complete deadline exactly via a timer, if second-level accuracy of `timed_out` ever matters | REQ-CMD-006 |
-| Alerts not asked for yet: DDNS sync that keeps failing, command timed out/completed, agent became `unreachable`; flap suppression and quiet hours; Vietnamese or templated messages; an alert history instead of only `last_*` | REQ-ALERT known gaps |
-| Persist undelivered alerts across a restart (outbox), only if losing them ever matters | ADR-021, REQ-ALERT-007 |
-| Port forwarding: source-address allow-list per rule, per-rule traffic figures and a live connection list, `listen_address` offered from a dedicated endpoint instead of the metrics, PROXY protocol so the target sees the client address, a rule that follows a device (target by device id) | REQ-PF known gaps, ADR-022 |
-| Endpoint for `ddns_sync_history` (the UI sees only the `last_*` fields and the activity feed) | REQ-DDNS known gaps |
-| Sub-tick backoff (the syncer ticks every 5 s, so a 1 s retry waits for the next tick); make the tick a config key if it matters | REQ-DDNS known gaps |
-| ~~Revoke one legacy token~~ solved for new integrations by service account keys (ADR-018); the HS256 legacy tokens still die only with their account. `homecore user disable\|enable\|delete` is still missing (set `disabled` with SQL) | ADR-017, ADR-018, REQ-AUTH-020 |
-| Per-key device restrictions, a cap on keys per user, user-facing rotate-by-id | ADR-018 |
-| Windows metrics (gopsutil compiles for it, untested; load average is restricted there) | REQ-SYS-001 |
+| Item                                                                                                                                                                                                                                                                                          | Source                                                                                            |
+|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
+| Make the audit write for `device.shutdown` blocking (refuse the action when it cannot be recorded), if the owner wants that stricter rule                                                                                                                                                     | ADR-015, REQ-SHD-009                                                                              |
+| Controller key rotation (insert a new key, retire the old, let agents trust both)                                                                                                                                                                                                             | REQ-SHD known gaps                                                                                |
+| Health-job interval as a config key; pin or accept self-signed agent certificates for `https` bindings                                                                                                                                                                                        | REQ-SHD known gaps                                                                                |
+| Activity feed from sources other than `audit_log` (monitor transitions) once the UI needs them; DDNS changes and record updates are already audited                                                                                                                                           | ADR-015                                                                                           |
+| Cap the agent's accepted-`command_id` map (the protocol spec says caches are bounded)                                                                                                                                                                                                         | REQ-AG-008 gap                                                                                    |
+| Signed agent acknowledgements (protocol v2)                                                                                                                                                                                                                                                   | agent-protocol §7                                                                                 |
+| Signed agent announce for automatic IP updates                                                                                                                                                                                                                                                | ADR-002                                                                                           |
+| Tests for CLI flag precedence                                                                                                                                                                                                                                                                 | REQ-RT-003 gap (the agent flags merge is tested, REQ-AG-016/017; the `flag` declarations are not) |
+| launchd plist from the Agent setup prompt (macOS); TLS flags for the Agent so an `https` binding needs no config file                                                                                                                                                                         | ADR-019                                                                                           |
+| Run the generated Windows shortcut and Linux unit on real hosts; check the shortcut asks for elevation                                                                                                                                                                                        | REQ-AG-019                                                                                        |
+| Test `/readyz` 503 path and `WithTx` rollback                                                                                                                                                                                                                                                 | REQ-API-004, REQ-ST-004                                                                           |
+| Re-run the UI against the real Controller as Phases 3/4 land (UI is verified only against a mock; Phase 2 verified the API shapes with curl against `mappers.ts`, not the running UI)                                                                                                         | GAP-BE-01..03                                                                                     |
+| Hostname field in the device form (once hostname-based probing exists)                                                                                                                                                                                                                        | GAP-API-15                                                                                        |
+| Run the frontend checks (`make ui-check`) in CI once a CI pipeline exists                                                                                                                                                                                                                     | GAP-INF-06, 07, REQ-UI-016                                                                        |
+| `homecore user disable\|enable\|delete` (the `users.disabled` flag is honoured but only settable with SQL); UI for changing the password                                                                                                                                                      | GAP-API-14, REQ-AUTH known gaps                                                                   |
+| Cut off access tokens at logout/password change (token version or `jti` deny-list), if the 15 min window ever matters                                                                                                                                                                         | REQ-AUTH known gaps                                                                               |
+| Per-account login lockout (only per-IP limit exists); separate rate-limit bucket for `refresh`/`logout`                                                                                                                                                                                       | REQ-AUTH known gaps                                                                               |
+| Account creation on Android (no CLI): decide in Phase 5 how the host app calls `auth.Accounts` through `mobile`                                                                                                                                                                               | REQ-RT known gaps                                                                                 |
+| ~~Release pipeline must run `make ui-build` before `make cross`~~ done for Linux amd64/arm64 in `.github/workflows/build.yml`; remains for the other `make cross` targets                                                                                                                     | GAP-INF-10                                                                                        |
+| Persist the monitor's consecutive-failure counters across restarts (today only the status survives)                                                                                                                                                                                           | REQ-MON-004 known gap                                                                             |
+| Shorten the deadline sweep (5 s) or complete deadline exactly via a timer, if second-level accuracy of `timed_out` ever matters                                                                                                                                                               | REQ-CMD-006                                                                                       |
+| Alerts not asked for yet: DDNS sync that keeps failing, command timed out/completed, agent became `unreachable`; flap suppression and quiet hours; Vietnamese or templated messages; an alert history instead of only `last_*`                                                                | REQ-ALERT known gaps                                                                              |
+| Persist undelivered alerts across a restart (outbox), only if losing them ever matters                                                                                                                                                                                                        | ADR-021, REQ-ALERT-007                                                                            |
+| Port forwarding: source-address allow-list per rule, per-rule traffic figures and a live connection list, `listen_address` offered from a dedicated endpoint instead of the metrics, PROXY protocol so the target sees the client address, a rule that follows a device (target by device id) | REQ-PF known gaps, ADR-022                                                                        |
+| Endpoint for `ddns_sync_history` (the UI sees only the `last_*` fields and the activity feed)                                                                                                                                                                                                 | REQ-DDNS known gaps                                                                               |
+| Sub-tick backoff (the syncer ticks every 5 s, so a 1 s retry waits for the next tick); make the tick a config key if it matters                                                                                                                                                               | REQ-DDNS known gaps                                                                               |
+| ~~Revoke one legacy token~~ solved for new integrations by service account keys (ADR-018); the HS256 legacy tokens still die only with their account. `homecore user disable\|enable\|delete` is still missing (set `disabled` with SQL)                                                      | ADR-017, ADR-018, REQ-AUTH-020                                                                    |
+| Per-key device restrictions, a cap on keys per user, user-facing rotate-by-id                                                                                                                                                                                                                 | ADR-018                                                                                           |
+| Windows metrics (gopsutil compiles for it, untested; load average is restricted there)                                                                                                                                                                                                        | REQ-SYS-001                                                                                       |
