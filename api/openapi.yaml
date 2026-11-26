@@ -1387,7 +1387,7 @@ components:
         id: { type: string, format: uuid }
         name: { type: string }
         description: { type: string }
-        hostname: { type: string }
+        hostname: { type: string, deprecated: true, x-deprecated-reason: "probes, agent requests and alerts use ip_address", description: "Deprecated and ignored: probes, agent requests and alerts always use `ip_address`. Kept for compatibility; will be removed." }
         ip_address: { type: string }
         mac_address: { type: string, example: "aa:bb:cc:dd:ee:ff" }
         wol_broadcast_address: { type: string }
@@ -1415,7 +1415,7 @@ components:
       properties:
         name: { type: string, minLength: 1, maxLength: 100 }
         description: { type: string, maxLength: 1000 }
-        hostname: { type: string, maxLength: 253 }
+        hostname: { type: string, maxLength: 253, deprecated: true, x-deprecated-reason: "probes, agent requests and alerts use ip_address", description: "Deprecated and ignored: probes, agent requests and alerts always use `ip_address`. Kept for compatibility; will be removed." }
         ip_address: { type: string, maxLength: 253 }
         mac_address: { type: string }
         wol_broadcast_address: { type: string }
@@ -1436,7 +1436,7 @@ components:
       properties:
         name: { type: string, minLength: 1, maxLength: 100 }
         description: { type: string, maxLength: 1000 }
-        hostname: { type: string, maxLength: 253 }
+        hostname: { type: string, maxLength: 253, deprecated: true, x-deprecated-reason: "probes, agent requests and alerts use ip_address", description: "Deprecated and ignored: probes, agent requests and alerts always use `ip_address`. Kept for compatibility; will be removed." }
         ip_address: { type: string, maxLength: 253 }
         mac_address: { type: string }
         wol_broadcast_address: { type: string }

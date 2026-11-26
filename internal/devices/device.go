@@ -61,9 +61,13 @@ const (
 
 // Device is a managed machine.
 type Device struct {
-	ID                  string
-	Name                string
-	Description         string
+	ID          string
+	Name        string
+	Description string
+	// Deprecated: Hostname is no longer used for probing, agent calls or alerts; those always use
+	// IPAddress (a name can stop resolving when the machine changes OS or DHCP lease, e.g. a
+	// dual-boot PC). The field is still stored, validated and served for compatibility and is
+	// scheduled for removal.
 	Hostname            string
 	IPAddress           string
 	MACAddress          string
@@ -84,11 +88,10 @@ type Device struct {
 	UpdatedAt           time.Time
 }
 
-// ProbeHost returns the address used for TCP probes: hostname if set, else IP.
+// ProbeHost returns the address used for TCP probes, agent requests and alert text: always
+// IPAddress. The deprecated Hostname is ignored, because a name may not resolve while the IP does
+// (dual-boot machine that registers a different name per OS, DNS outage, stale lease).
 func (d Device) ProbeHost() string {
-	if d.Hostname != "" {
-		return d.Hostname
-	}
 	return d.IPAddress
 }
 

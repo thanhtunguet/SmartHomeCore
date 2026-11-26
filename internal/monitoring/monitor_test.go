@@ -594,3 +594,27 @@ func TestTransitionObserverSeesChangesBeforeTheObserver(t *testing.T) {
 		t.Fatalf("manual probe: %+v", last)
 	}
 }
+
+// A device that still carries the deprecated hostname is probed by its IP: the name may not
+// resolve (dual-boot PC that registers a different name per OS) while the IP answers.
+func TestProbeUsesTheIPNotTheDeprecatedHostname(t *testing.T) {
+	e := newEnv(t, nil)
+	ctx := context.Background()
+	enabled := true
+	d, err := e.svc.Create(ctx, devices.CreateInput{
+		Name: "pc", IPAddress: "10.0.0.7", Hostname: "linux-name-only", MonitorPort: 3389,
+		Enabled: &enabled, MonitorIntervalSeconds: ptr(30),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.prober.set("10.0.0.7", 3389, true) // the hostname is deliberately unknown to the prober
+
+	out, err := e.mon.ProbeNow(ctx, d.ID)
+	if err != nil || !out.Result.Reachable || out.Status != devices.StatusOnline {
+		t.Fatalf("probe: %+v %v", out, err)
+	}
+	if e.prober.count("10.0.0.7", 3389) != 1 || e.prober.count("linux-name-only", 3389) != 0 {
+		t.Fatalf("probed the wrong host: ip=%d name=%d", e.prober.count("10.0.0.7", 3389), e.prober.count("linux-name-only", 3389))
+	}
+}

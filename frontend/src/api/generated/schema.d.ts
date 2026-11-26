@@ -1038,6 +1038,10 @@ export interface components {
             id: string;
             name: string;
             description?: string;
+            /**
+             * @deprecated
+             * @description Deprecated and ignored: probes, agent requests and alerts always use `ip_address`. Kept for compatibility; will be removed.
+             */
             hostname?: string;
             ip_address: string;
             /** @example aa:bb:cc:dd:ee:ff */
@@ -1067,6 +1071,10 @@ export interface components {
         DeviceCreate: {
             name: string;
             description?: string;
+            /**
+             * @deprecated
+             * @description Deprecated and ignored: probes, agent requests and alerts always use `ip_address`. Kept for compatibility; will be removed.
+             */
             hostname?: string;
             ip_address: string;
             mac_address?: string;
@@ -1091,6 +1099,10 @@ export interface components {
         DeviceUpdate: {
             name?: string;
             description?: string;
+            /**
+             * @deprecated
+             * @description Deprecated and ignored: probes, agent requests and alerts always use `ip_address`. Kept for compatibility; will be removed.
+             */
             hostname?: string;
             ip_address?: string;
             mac_address?: string;

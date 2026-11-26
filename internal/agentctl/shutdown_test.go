@@ -178,7 +178,7 @@ func TestDispatchSendsASignedProtocolRequestAndAcknowledges(t *testing.T) {
 	fa := newFakeAgent(t, nil)
 	fa.respond = accepted(fa, "accepted")
 	d := fa.device(t)
-	d.Hostname = "" // the IP is used
+	d.Hostname = "unresolvable.invalid" // deprecated and ignored: the IP is used
 
 	res := fx.disp.Dispatch(context.Background(), fx.cmd, d)
 	if res.Status != commands.StatusAcknowledged || res.Attempts != 1 || res.ErrorCode != "" {
@@ -507,7 +507,7 @@ func TestAgentURL(t *testing.T) {
 		want string
 	}{
 		{devices.Device{IPAddress: "192.168.1.20", Agent: &devices.AgentBinding{Port: 9750, Scheme: "http"}}, "http://192.168.1.20:9750/agent/v1/commands"},
-		{devices.Device{IPAddress: "192.168.1.20", Hostname: "nas.lan", Agent: &devices.AgentBinding{Port: 9751, Scheme: "https"}}, "https://nas.lan:9751/agent/v1/commands"},
+		{devices.Device{IPAddress: "192.168.1.20", Hostname: "nas.lan", Agent: &devices.AgentBinding{Port: 9751, Scheme: "https"}}, "https://192.168.1.20:9751/agent/v1/commands"},
 		{devices.Device{IPAddress: "fd00::1", Agent: &devices.AgentBinding{Port: 9750, Scheme: "http"}}, "http://[fd00::1]:9750/agent/v1/commands"},
 	}
 	for _, tc := range cases {
