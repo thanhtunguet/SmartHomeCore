@@ -221,7 +221,7 @@ func newDevEnvOpts(t *testing.T, mutate func(*config.Controller), realProbe bool
 		Config: cfg, Log: log, DB: db, Auth: authSvc, ServiceKeys: keySvc,
 		Devices: devSvc, Commands: e.engine, Monitor: e.mon, Audit: writer,
 		ControllerKey: key, Activity: activity.NewService(db), DDNS: e.ddnsSvc, Metrics: e.metrics,
-		Alerts: e.alerts, PortForward: e.pf,
+		Alerts: e.alerts, PortForward: e.pf, AgentInspector: agentctl.NewInspector(),
 	})
 	if err != nil {
 		t.Fatal(err)

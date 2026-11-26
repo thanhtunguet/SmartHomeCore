@@ -3,6 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { Device, DeviceType, OperatingSystem } from '../../types';
 import { CustomSelect } from '../common/CustomSelect';
 import { AgentSetupPanel } from './AgentSetupPanel';
+import { AgentDetectPanel } from './AgentDetectPanel';
 import { newAgentId } from '../../api/agentCommand';
 import {
   X,
@@ -573,6 +574,17 @@ export const DeviceFormModal: React.FC = () => {
                         ]}
                       />
                     </div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200 dark:border-neutral-800">
+                    <AgentDetectPanel
+                      host={ip}
+                      port={agentPort}
+                      scheme={agentScheme}
+                      agentId={agentId}
+                      onUseId={setAgentId}
+                      fillOnFirstLook={!editingDevice?.shutdown.enabled}
+                    />
                   </div>
 
                   <div className="p-3 rounded-lg bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200 dark:border-neutral-800">

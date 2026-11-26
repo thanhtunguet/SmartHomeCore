@@ -270,6 +270,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask the agent at an address who it is (before binding a device to it)
+         * @description The Controller calls `GET /agent/v1/healthz` on the agent at `host:port` and returns what it
+         *     answered: the agent's `agent_id`, version and the key ids it trusts. Use it to reuse the id of an
+         *     agent that is already installed instead of generating a new one, and to see whether this
+         *     Controller's key is trusted by that agent (`controller_trusted`).
+         *
+         *     Because the Controller makes the request, the target is restricted: `host` must be an IP
+         *     literal that is private (RFC 1918, ULA), CGNAT or loopback (`400` otherwise, link-local included; host names are never
+         *     resolved), redirects and proxies are not followed, the wait is 2 s and only fields the
+         *     Controller parsed itself are returned. Session tokens only (no `x-token-scopes`). A target that
+         *     does not answer, or answers like something else, is `200` with `reachable: false` and `error`.
+         */
+        post: operations["inspectAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/devices/{id}/wake": {
         parameters: {
             query?: never;
@@ -1020,6 +1049,40 @@ export interface components {
              * @description Last successful contact with the agent (a health check or an accepted shutdown); absent until then.
              */
             last_ok_at?: $Read<string>;
+        };
+        AgentInspectRequest: {
+            /** @description IP literal of the device (private, CGNAT or loopback). */
+            host: string;
+            /** @default 9750 */
+            port?: number;
+            /**
+             * @default http
+             * @enum {string}
+             */
+            scheme?: "http" | "https";
+        };
+        AgentInspection: {
+            /** @description True when a HomeCore agent answered. */
+            reachable: boolean;
+            /**
+             * Format: uuid
+             * @description The agent's id; present when reachable.
+             */
+            agent_id?: string;
+            /** @description Agent version; present when reachable. */
+            version?: string;
+            /**
+             * @description `key_id`s of the Controllers the agent trusts. Absent when the agent is too old to report them
+             *     (not the same as an empty list, which means it trusts nobody).
+             */
+            trusted_key_ids?: string[];
+            /**
+             * @description Whether this Controller's key is among `trusted_key_ids`. Absent when the agent does not
+             *     report its keys or this Controller has no key.
+             */
+            controller_trusted?: boolean;
+            /** @description Why `reachable` is false. */
+            error?: string;
         };
         /**
          * @description Kind of machine; used by clients for icons and labels only.
@@ -2073,6 +2136,33 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    inspectAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentInspectRequest"];
+            };
+        };
+        responses: {
+            /** @description What the address answered */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInspection"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     wakeDevice: {

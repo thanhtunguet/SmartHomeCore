@@ -83,6 +83,9 @@ const calls: Record<string, () => Promise<unknown>> = {
   getSystemMetrics: () => endpoints.getSystemMetrics(),
   getSystemInfo: () => endpoints.getSystemInfo(),
   getControllerKey: () => endpoints.getControllerKey(),
+  inspectAgent: () => endpoints.inspectAgent({ host: '10.0.0.2', port: 9750, scheme: 'http' }),
+  getOpenAPISettings: () => endpoints.getOpenAPISettings(),
+  updateOpenAPISettings: () => endpoints.updateOpenAPISettings(true),
   listDdnsConfigs: () => endpoints.listDdnsConfigs(),
   createDdnsConfig: () =>
     endpoints.createDdnsConfig({ name: 'n', zone_id: 'z', record_id: 'r', record_name: 'h.example.com', record_type: 'A', api_token: 't' }),

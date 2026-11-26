@@ -18,6 +18,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/thanhtunguet/homecore/internal/activity"
+	"github.com/thanhtunguet/homecore/internal/agentctl"
 	"github.com/thanhtunguet/homecore/internal/alerts"
 	"github.com/thanhtunguet/homecore/internal/api/gen"
 	"github.com/thanhtunguet/homecore/internal/api/handlers"
@@ -75,6 +76,8 @@ type Deps struct {
 	Alerts *alerts.Service // alert channel endpoints; nil answers 501
 
 	PortForward *portforward.Service // port forwarding endpoints; nil answers 501
+
+	AgentInspector *agentctl.Inspector // POST /agents/inspect; nil answers 501
 }
 
 // Server is the Controller HTTP server.
@@ -198,6 +201,7 @@ func newRouter(d Deps) (http.Handler, error) {
 	h.DDNS, h.Metrics = d.DDNS, d.Metrics
 	h.Alerts = d.Alerts
 	h.PortForward = d.PortForward
+	h.AgentInspector = d.AgentInspector
 	h.SystemSettings = d.SystemSettings
 	throttle := middleware.NewDeviceThrottle(DeviceCommandInterval)
 	h.Throttle = throttle

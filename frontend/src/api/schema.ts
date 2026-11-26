@@ -81,6 +81,8 @@ export type ApiSystemMetrics = SystemMetrics;
 export type SystemInfo = Res<'SystemInfo'>;
 export type OpenAPISettings = Res<'OpenAPISettings'>;
 export type ControllerKey = Res<'ControllerKey'>;
+export type AgentInspectRequest = Req<'AgentInspectRequest'>;
+export type AgentInspection = Res<'AgentInspection'>;
 
 export type DnsRecordType = Schemas['DnsRecordType'];
 export type DdnsConfig = Res<'DdnsConfig'>;

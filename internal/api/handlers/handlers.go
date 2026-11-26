@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/thanhtunguet/homecore/internal/activity"
+	"github.com/thanhtunguet/homecore/internal/agentctl"
 	"github.com/thanhtunguet/homecore/internal/alerts"
 	"github.com/thanhtunguet/homecore/internal/api/gen"
 	"github.com/thanhtunguet/homecore/internal/api/middleware"
@@ -63,6 +64,8 @@ type Handlers struct {
 	Alerts *alerts.Service // alert channels (nil: 501)
 
 	PortForward *portforward.Service // port forwarding rules (nil: 501)
+
+	AgentInspector *agentctl.Inspector // POST /agents/inspect (nil: 501)
 }
 
 var _ gen.ServerInterface = (*Handlers)(nil)

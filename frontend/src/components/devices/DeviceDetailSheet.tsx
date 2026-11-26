@@ -312,6 +312,24 @@ export const DeviceDetailSheet: React.FC<DeviceDetailSheetProps> = ({
                 <span className="text-neutral-500 dark:text-neutral-400">IP Address</span>
                 <span className="font-mono font-medium text-neutral-900 dark:text-neutral-100">{device.ip}</span>
               </div>
+              <div className="flex justify-between items-center gap-3">
+                <span
+                  className="text-neutral-500 dark:text-neutral-400"
+                  title="Informational only: HomeCore connects by IP address, never by this name."
+                >
+                  Hostname
+                </span>
+                <span
+                  data-testid="device-hostname"
+                  className={
+                    device.hostname
+                      ? 'font-mono text-neutral-800 dark:text-neutral-200 truncate'
+                      : 'text-neutral-400 dark:text-neutral-500'
+                  }
+                >
+                  {device.hostname || 'N/A'}
+                </span>
+              </div>
               <div className="flex justify-between items-center">
                 <span className="text-neutral-500 dark:text-neutral-400">MAC Address</span>
                 <span className="font-mono text-neutral-800 dark:text-neutral-200">{device.mac}</span>

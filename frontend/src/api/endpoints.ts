@@ -6,6 +6,8 @@
 import { request } from './client';
 import type {
   AgentBinding,
+  AgentInspectRequest,
+  AgentInspection,
   ActivityCategory,
   AlertChannel,
   AlertChannelCreate,
@@ -141,6 +143,10 @@ export const getOpenAPISettings = () => request<OpenAPISettings>('/api/v1/system
 export const updateOpenAPISettings = (enabled: boolean) =>
   request<OpenAPISettings>('/api/v1/system/settings/openapi', { method: 'PUT', body: { enabled } });
 export const getControllerKey = () => request<ControllerKey>('/api/v1/system/controller-key');
+
+// agents
+/** Ask the agent at an IP what it is (its id, version, trusted key ids); the Controller makes the call. */
+export const inspectAgent = (body: AgentInspectRequest) => request<AgentInspection>('/api/v1/agents/inspect', { method: 'POST', body });
 
 // ddns
 export const listDdnsConfigs = () => request<{ items: ApiDdnsConfig[] }>('/api/v1/ddns').then(r => r.items);

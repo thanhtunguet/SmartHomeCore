@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"sync"
 	"time"
 )
@@ -226,6 +227,18 @@ func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 	}
 	v.nonces = NewExpiringSet(maxNonces)
 	return v, nil
+}
+
+// KeyIDs lists the key ids of the trusted Controllers, sorted. Key ids are hashes of public keys,
+// not secrets; the Agent reports them on GET /agent/v1/healthz so an operator can see whether a
+// Controller's key is trusted before sending a command.
+func (v *Verifier) KeyIDs() []string {
+	ids := make([]string, 0, len(v.keys))
+	for id := range v.keys {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // Verify authenticates and validates one request. On success the nonce is consumed.

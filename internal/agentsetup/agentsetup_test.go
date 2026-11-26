@@ -246,3 +246,24 @@ func TestRunOnOtherSystemsPrintsTheCommand(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
 }
+
+// The pasted command may carry several --trusted-controller flags; all survive Parse, Args and the
+// generated systemd unit, in order.
+func TestSeveralTrustedControllersSurviveParseAndRender(t *testing.T) {
+	k1, k2 := testKey(t), testKey(t)
+	p, err := Parse("./homecore --mode agent --agent-id " + testID +
+		" --trusted-controller " + k1 + " --trusted-controller " + k2 + " --agent-listen :9750")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.TrustedControllers) != 2 || p.TrustedControllers[0] != k1 || p.TrustedControllers[1] != k2 {
+		t.Fatalf("parsed keys: %v", p.TrustedControllers)
+	}
+	want := "--trusted-controller " + k1 + " --trusted-controller " + k2 + " --agent-listen :9750"
+	if got := strings.Join(p.Args(), " "); !strings.Contains(got, want) {
+		t.Errorf("Args = %q, want it to contain %q", got, want)
+	}
+	if unit := RenderUnit(p); !strings.Contains(unit, want) {
+		t.Errorf("unit lacks both keys:\n%s", unit)
+	}
+}

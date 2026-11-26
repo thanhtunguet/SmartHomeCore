@@ -1,6 +1,6 @@
 # HomeCore Agent Protocol v1
 
-Last reviewed: 2026-11-15 (agent_id may be supplied as an argument, ADR-019; wire format unchanged).
+Last reviewed: 2026-11-26 (healthz reports `trusted_key_ids`, additive); 2026-11-15 (agent_id may be supplied as an argument, ADR-019; wire format unchanged).
 
 Normative spec for Controller → Agent commands. Implementation:
 `internal/agent/protocol` (shared by both roles). Rationale: ADR-001, ADR-005.
@@ -117,9 +117,9 @@ v1). Controller-side details that the protocol does not constrain:
 
 | Endpoint | Auth | Purpose |
 |----------|------|---------|
-| `GET /agent/v1/healthz` | none | liveness: `{"status":"ok","agent_id":"…","version":"…"}`; may be used as the device `monitor_port` |
+| `GET /agent/v1/healthz` | none | liveness: `{"status":"ok","agent_id":"…","version":"…","trusted_key_ids":["<key_id>",…]}`; may be used as the device `monitor_port`. `trusted_key_ids` (added 2026-11-26, additive: older agents omit it, clients must treat absence as "unknown", not "none") lists the `key_id`s the Agent trusts; they are hashes of public keys. |
 
-The Controller's health job (`agentctl.Health`, once a minute) calls this endpoint for every bound device that is online and accepts the answer only when `status` is `ok` and `agent_id` equals the binding's (ADR-015). It records the answer as `agent.status`, `agent.version` and `agent.last_ok_at` on the binding.
+The Controller also calls it on demand for `POST /api/v1/agents/inspect` (REQ-AG-020) so the device form can reuse an installed agent's id and check trust. The Controller's health job (`agentctl.Health`, once a minute) calls this endpoint for every bound device that is online and accepts the answer only when `status` is `ok` and `agent_id` equals the binding's (ADR-015). It records the answer as `agent.status`, `agent.version` and `agent.last_ok_at` on the binding.
 
 ## 7. Future (not in v1)
 
