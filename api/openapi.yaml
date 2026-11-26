@@ -368,6 +368,37 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
 
+  /api/v1/agents/inspect:
+    post:
+      tags: [devices]
+      operationId: inspectAgent
+      summary: Ask the agent at an address who it is (before binding a device to it)
+      description: |
+        The Controller calls `GET /agent/v1/healthz` on the agent at `host:port` and returns what it
+        answered: the agent's `agent_id`, version and the key ids it trusts. Use it to reuse the id of an
+        agent that is already installed instead of generating a new one, and to see whether this
+        Controller's key is trusted by that agent (`controller_trusted`).
+
+        Because the Controller makes the request, the target is restricted: `host` must be an IP
+        literal that is private (RFC 1918, ULA), CGNAT or loopback (`400` otherwise, link-local included; host names are never
+        resolved), redirects and proxies are not followed, the wait is 2 s and only fields the
+        Controller parsed itself are returned. Session tokens only (no `x-token-scopes`). A target that
+        does not answer, or answers like something else, is `200` with `reachable: false` and `error`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentInspectRequest" }
+      responses:
+        "200":
+          description: What the address answered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentInspection" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
   /api/v1/devices/{id}/wake:
     parameters:
       - $ref: "#/components/parameters/DeviceId"
@@ -1366,6 +1397,35 @@ components:
         version: { type: string, readOnly: true, description: Agent version reported by its last successful health check; absent until then. }
         last_ok_at: { type: string, format: date-time, readOnly: true, description: Last successful contact with the agent (a health check or an accepted shutdown); absent until then. }
 
+    AgentInspectRequest:
+      type: object
+      required: [host]
+      additionalProperties: false
+      properties:
+        host: { type: string, maxLength: 64, description: "IP literal of the device (private, CGNAT or loopback)." }
+        port: { type: integer, minimum: 1, maximum: 65535, default: 9750 }
+        scheme: { type: string, enum: [http, https], default: http }
+
+    AgentInspection:
+      type: object
+      required: [reachable]
+      properties:
+        reachable: { type: boolean, description: True when a HomeCore agent answered. }
+        agent_id: { type: string, format: uuid, description: The agent's id; present when reachable. }
+        version: { type: string, description: Agent version; present when reachable. }
+        trusted_key_ids:
+          type: array
+          items: { type: string, example: 3f9a0c1d2b4e5f60 }
+          description: |
+            `key_id`s of the Controllers the agent trusts. Absent when the agent is too old to report them
+            (not the same as an empty list, which means it trusts nobody).
+        controller_trusted:
+          type: boolean
+          description: |
+            Whether this Controller's key is among `trusted_key_ids`. Absent when the agent does not
+            report its keys or this Controller has no key.
+        error: { type: string, description: Why `reachable` is false. }
+
     DeviceType:
       type: string
       description: Kind of machine; used by clients for icons and labels only.
@@ -1387,7 +1447,7 @@ components:
         id: { type: string, format: uuid }
         name: { type: string }
         description: { type: string }
-        hostname: { type: string }
+        hostname: { type: string, deprecated: true, x-deprecated-reason: "probes, agent requests and alerts use ip_address", description: "Deprecated and ignored: probes, agent requests and alerts always use `ip_address`. Kept for compatibility; will be removed." }
         ip_address: { type: string }
         mac_address: { type: string, example: "aa:bb:cc:dd:ee:ff" }
         wol_broadcast_address: { type: string }
@@ -1415,7 +1475,7 @@ components:
       properties:
         name: { type: string, minLength: 1, maxLength: 100 }
         description: { type: string, maxLength: 1000 }
-        hostname: { type: string, maxLength: 253 }
+        hostname: { type: string, maxLength: 253, deprecated: true, x-deprecated-reason: "probes, agent requests and alerts use ip_address", description: "Deprecated and ignored: probes, agent requests and alerts always use `ip_address`. Kept for compatibility; will be removed." }
         ip_address: { type: string, maxLength: 253 }
         mac_address: { type: string }
         wol_broadcast_address: { type: string }
@@ -1436,7 +1496,7 @@ components:
       properties:
         name: { type: string, minLength: 1, maxLength: 100 }
         description: { type: string, maxLength: 1000 }
-        hostname: { type: string, maxLength: 253 }
+        hostname: { type: string, maxLength: 253, deprecated: true, x-deprecated-reason: "probes, agent requests and alerts use ip_address", description: "Deprecated and ignored: probes, agent requests and alerts always use `ip_address`. Kept for compatibility; will be removed." }
         ip_address: { type: string, maxLength: 253 }
         mac_address: { type: string }
         wol_broadcast_address: { type: string }

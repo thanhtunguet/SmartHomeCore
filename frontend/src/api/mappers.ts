@@ -67,6 +67,8 @@ export function toDevice(d: ApiDevice, latencyMs?: number): Device {
     type: d.device_type ?? 'desktop',
     os: d.os ?? 'linux',
     ip: d.ip_address,
+    // Deprecated in the API (never used to connect); shown read-only in the device sheet.
+    hostname: d.hostname ?? '',
     mac: (d.mac_address ?? '').toUpperCase(),
     status: d.status,
     powerTransition: d.power_transition,

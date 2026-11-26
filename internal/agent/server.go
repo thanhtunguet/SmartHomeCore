@@ -130,8 +130,9 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	httpx.WriteJSON(w, http.StatusOK, map[string]string{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"status": "ok", "agent_id": s.agentID, "version": version.Version,
+		"trusted_key_ids": s.verifier.KeyIDs(),
 	})
 }
 

@@ -64,7 +64,7 @@ func (h *Handlers) CreateDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d, err := h.Devices.Create(r.Context(), devices.CreateInput{
-		Name: req.Name, Description: derefStr(req.Description), Hostname: derefStr(req.Hostname),
+		Name: req.Name, Description: derefStr(req.Description), Hostname: derefStr(req.Hostname), //nolint:staticcheck // deprecated field is still accepted and served for compatibility
 		IPAddress: req.IpAddress, MACAddress: derefStr(req.MacAddress),
 		WOLBroadcastAddress: derefStr(req.WolBroadcastAddress), WOLPort: req.WolPort,
 		DeviceType: derefStr(req.DeviceType), OS: derefStr(req.Os),
@@ -105,7 +105,7 @@ func (h *Handlers) UpdateDevice(w http.ResponseWriter, r *http.Request, id gen.D
 		return
 	}
 	in := devices.UpdateInput{
-		Name: req.Name, Description: req.Description, Hostname: req.Hostname, IPAddress: req.IpAddress,
+		Name: req.Name, Description: req.Description, Hostname: req.Hostname, IPAddress: req.IpAddress, //nolint:staticcheck // deprecated field is still accepted and served for compatibility
 		MACAddress: req.MacAddress, WOLBroadcastAddress: req.WolBroadcastAddress, WOLPort: req.WolPort,
 		DeviceType: enumStr(req.DeviceType), OS: enumStr(req.Os), MonitorPort: req.MonitorPort,
 		MonitorIntervalSeconds: req.MonitorIntervalSeconds, MonitorTimeoutMs: req.MonitorTimeoutMs,
@@ -254,7 +254,7 @@ func toAPIDevice(d devices.Device, pt devices.PowerTransition) gen.Device {
 		Id:                     uuid.MustParse(d.ID),
 		Name:                   d.Name,
 		Description:            nonEmpty(d.Description),
-		Hostname:               nonEmpty(d.Hostname),
+		Hostname:               nonEmpty(d.Hostname), //nolint:staticcheck // deprecated field is still accepted and served for compatibility
 		IpAddress:              d.IPAddress,
 		MacAddress:             nonEmpty(d.MACAddress),
 		WolBroadcastAddress:    nonEmpty(d.WOLBroadcastAddress),

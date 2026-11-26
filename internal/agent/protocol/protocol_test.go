@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"slices"
+	"sort"
 	"testing"
 	"time"
 )
@@ -223,5 +225,72 @@ func TestExpiringSetFailsClosedWhenFull(t *testing.T) {
 	later := now.Add(2 * time.Minute)
 	if got := s.Add("c", later.Add(time.Minute), later); got != AddOK {
 		t.Fatalf("expired entries must be evicted, got %v", got)
+	}
+}
+
+// An Agent may trust several Controllers (e.g. the Pi and the Android box): a command signed by any
+// listed key is accepted, a command signed by an unlisted key is the same 401 as an unknown key.
+func TestVerifyAcceptsEveryTrustedKeyAndOnlyThose(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	var pubs []ed25519.PublicKey
+	var privs []ed25519.PrivateKey
+	for i := 0; i < 3; i++ {
+		pub, priv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pubs, privs = append(pubs, pub), append(privs, priv)
+	}
+	v, err := NewVerifier(VerifierConfig{
+		AgentID:        agentID,
+		TrustedKeys:    pubs[:2], // the third key is not trusted
+		AllowedActions: []Action{ActionShutdown},
+		ClockSkew:      30 * time.Second,
+		StartedAt:      now.Add(-time.Hour),
+		Now:            func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, priv := range privs {
+		cmd, err := NewCommand(commandID, agentID, ActionShutdown, now) // fresh nonce each call
+		if err != nil {
+			t.Fatal(err)
+		}
+		req, err := Sign(priv, cmd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, verr := v.Verify(req.KeyID, req.Signature, req.Body)
+		if trusted := i < 2; trusted && verr != nil {
+			t.Errorf("key %d is trusted but was rejected: %v", i, verr)
+		} else if !trusted && (verr == nil || verr.Status != http.StatusUnauthorized) {
+			t.Errorf("key %d is not trusted but got %v, want 401", i, verr)
+		}
+	}
+}
+
+func TestKeyIDsListsTheTrustedKeysSorted(t *testing.T) {
+	var pubs []ed25519.PublicKey
+	for i := 0; i < 3; i++ {
+		pub, _, _ := ed25519.GenerateKey(rand.Reader)
+		pubs = append(pubs, pub)
+	}
+	v, err := NewVerifier(VerifierConfig{AgentID: agentID, TrustedKeys: pubs, AllowedActions: []Action{ActionShutdown}, ClockSkew: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := v.KeyIDs()
+	if len(got) != 3 || !sort.StringsAreSorted(got) {
+		t.Fatalf("KeyIDs = %v", got)
+	}
+	for _, p := range pubs {
+		if !slices.Contains(got, KeyID(p)) {
+			t.Errorf("missing %s", KeyID(p))
+		}
+	}
+	empty, _ := NewVerifier(VerifierConfig{AgentID: agentID, ClockSkew: time.Minute})
+	if ids := empty.KeyIDs(); ids == nil || len(ids) != 0 { // [] not null: "trusts nobody" is reported
+		t.Errorf("no keys: %#v", ids)
 	}
 }

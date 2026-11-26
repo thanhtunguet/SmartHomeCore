@@ -55,6 +55,11 @@ export interface Device {
   /** Stored by the Controller (`os`); informational. */
   os: OperatingSystem;
   ip: string;
+  /**
+   * Name stored for the device (`hostname`). Deprecated in the API: informational only, never used
+   * to connect. Empty when none is stored.
+   */
+  hostname: string;
   mac: string;
   status: DeviceStatus;
   powerTransition: PowerTransition;

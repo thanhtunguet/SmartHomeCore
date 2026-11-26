@@ -209,6 +209,7 @@ func runController(ctx context.Context, cfg config.Config, log *slog.Logger, opt
 		Metrics:         metrics,
 		Alerts:          alertSvc,
 		PortForward:     pfSvc,
+		AgentInspector:  agentctl.NewInspector(),
 	})
 	if err != nil {
 		return err

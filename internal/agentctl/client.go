@@ -65,7 +65,7 @@ func NewHTTPClient() *http.Client {
 }
 
 // agentURL builds <scheme>://<host>:<agent port><path> for a bound device. The host is the one the
-// monitor probes (hostname if set, else the IP address).
+// monitor probes (the device's IP address; the deprecated hostname is ignored).
 func agentURL(d devices.Device, path string) (string, error) {
 	if d.Agent == nil {
 		return "", errors.New("device has no agent binding")

@@ -136,6 +136,9 @@ type healthBody struct {
 	Status  string `json:"status"`
 	AgentID string `json:"agent_id"`
 	Version string `json:"version"`
+	// TrustedKeyIDs is absent from agents older than the field, so nil means "not reported", not
+	// "trusts nobody".
+	TrustedKeyIDs *[]string `json:"trusted_key_ids"`
 }
 
 // check asks one agent for its health and records the outcome.

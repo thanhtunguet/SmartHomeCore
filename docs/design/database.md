@@ -6,7 +6,7 @@
 | Schema version | `10` (`internal/storage/migrations/0001_init.sql` … `0010_openapi_setting.sql`) |
 | Owner role | Controller only. The Agent has no database |
 | Requirements | [storage-and-secrets.md](../requirements/storage-and-secrets.md) |
-| Last reviewed | 2026-11-23 (OpenAPI setting: migration 0010); 2026-11-18 (port forwarding: migration 0009); 2026-11-15 (alerts: migration 0008; earlier: 2026-11-14 service account keys: migration 0007; Phase 4: migration 0006, DDNS observed state and record uniqueness; earlier: Phase 3 migration 0005) |
+| Last reviewed | 2026-11-26 (`devices.hostname` deprecated, no schema change); 2026-11-23 (OpenAPI setting: migration 0010); 2026-11-18 (port forwarding: migration 0009); 2026-11-15 (alerts: migration 0008; earlier: 2026-11-14 service account keys: migration 0007; Phase 4: migration 0006, DDNS observed state and record uniqueness; earlier: Phase 3 migration 0005) |
 
 The DDL in `internal/storage/migrations/` is authoritative. This document explains it and must be
 updated in the same change as any new migration.
@@ -148,8 +148,8 @@ The device registry. Identity is `id`; addresses are mutable attributes (ADR-002
 | `id` | TEXT | no | | PK, UUIDv7 |
 | `name` | TEXT | no | | `UNIQUE COLLATE NOCASE` (API → `409` on clash) |
 | `description` | TEXT | no | `''` | |
-| `hostname` | TEXT | no | `''` | probe target if set |
-| `ip_address` | TEXT | no | | probe target otherwise; WOL subnet detection |
+| `hostname` | TEXT | no | `''` | **Deprecated**, ignored since 2026-11-26 (never a probe target). Kept for compatibility; remove with a migration later |
+| `ip_address` | TEXT | no | | probe target (always), agent address; WOL subnet detection |
 | `mac_address` | TEXT | no | `''` | normalised `aa:bb:cc:dd:ee:ff`; empty = WOL unavailable |
 | `wol_broadcast_address` | TEXT | no | `''` | override; empty = auto (directed broadcast) |
 | `wol_port` | INTEGER | no | `9` | 1–65535 |

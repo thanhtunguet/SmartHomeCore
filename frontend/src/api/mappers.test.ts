@@ -70,6 +70,21 @@ describe('toDevice', () => {
   });
 });
 
+describe('toDevice hostname (deprecated, shown read-only)', () => {
+  it('is empty when the Controller stores none, so the sheet shows N/A', () => {
+    expect(toDevice(device()).hostname).toBe('');
+    expect(toDevice(device({ hostname: '' })).hostname).toBe('');
+  });
+  it('carries the stored name through', () => {
+    expect(toDevice(device({ hostname: 'tungpt-mint' })).hostname).toBe('tungpt-mint');
+  });
+  it('is never sent back: create and update bodies do not contain it', () => {
+    const d = toDevice(device({ hostname: 'tungpt-mint' }));
+    expect(toDeviceCreate(d)).not.toHaveProperty('hostname');
+    expect(toDeviceUpdate(d, d)).not.toHaveProperty('hostname');
+  });
+});
+
 describe('agent status (AgentBinding.status/version/last_ok_at)', () => {
   const agent = { agent_id: 'a1', port: 9750 };
 
